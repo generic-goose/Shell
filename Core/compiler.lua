@@ -9,9 +9,120 @@ _G.ShellKeybinds = _G.ShellKeybinds or {}
 local UserInputService = game:GetService("UserInputService")
 local StarterGui = game:GetService("StarterGui")
 
+local compilerPath = "https://raw.githubusercontent.com/generic-goose/Shell/refs/heads/main/Core/compiler.lua"
+local funcPath = "https://raw.githubusercontent.com/generic-goose/Shell/refs/heads/main/Core/functions.lua"
+local uiPath = "https://raw.githubusercontent.com/generic-goose/Shell/refs/heads/main/Core/ui.lua"
+
 -- =========================================================
 -- HELPER FUNCTIONS
 -- =========================================================
+
+local function loadShellAssets()
+    local function fetch(url)
+        local success, result = pcall(function()
+            return game:HttpGet(url)
+        end)
+        return success and result or nil
+    end
+
+    local function ensureFolder(path)
+        if makefolder and isfolder and not isfolder(path) then
+            pcall(function() makefolder(path) end)
+        end
+    end
+
+    -- Helper functions to safely check file and folder existence
+    local function checkFolder(path)
+        return isfolder and isfolder(path) or false
+    end
+
+    local function checkFile(path)
+        return isfile and isfile(path) or false
+    end
+
+    -- Verify that all required directories and files are present
+    local allDependenciesExist = checkFolder("Shell")
+        and checkFolder("Shell/Assets")
+        and checkFolder("Shell/Core")
+        and checkFolder("Shell/Functions")
+        and checkFolder("Shell/Games")
+        and checkFolder("Shell/Assets/Themes")
+        and checkFile("Shell/Assets/Themes/default.csv")
+        and checkFile("Shell/Assets/Themes/shell.csv")
+        and checkFile("Shell/Core/imported.csv")
+        and checkFile("Shell/Core/autoexec.csv")
+        and checkFile("Shell/Assets/example.lua")
+
+    if allDependenciesExist then
+        return
+    end
+
+    print("[Shell Setup]: Initializing missing 'Shell' workspace structure and assets...")
+
+    -- Create directory structure
+    ensureFolder("Shell")
+    ensureFolder("Shell/Core")
+    ensureFolder("Shell/Assets")
+    ensureFolder("Shell/Assets/Themes")
+    ensureFolder("Shell/Games")
+    ensureFolder("Shell/Functions")
+
+    -- Ensure Core files exist
+    if writefile then
+        if not checkFile("Shell/Core/imported.csv") then
+            local importedUrl = "https://raw.githubusercontent.com/generic-goose/Shell/refs/heads/main/Core/imported.csv"
+            local importedData = fetch(importedUrl)
+            if importedData then
+                writefile("Shell/Core/imported.csv", importedData)
+            else
+                warn("[Shell Setup]: Failed to download imported.csv from GitHub")
+            end
+        end
+
+        if not checkFile("Shell/Core/autoexec.csv") then
+            writefile("Shell/Core/autoexec.csv", "")
+        end
+    end
+
+    -- Download missing assets from GitHub API
+    local HttpService = game:GetService("HttpService")
+    local assetsApiUrl = "https://api.github.com/repos/generic-goose/Shell/contents/Assets"
+    local assetsJsonResponse = fetch(assetsApiUrl)
+
+    if assetsJsonResponse then
+        local decodeSuccess, assetItems = pcall(function()
+            return HttpService:JSONDecode(assetsJsonResponse)
+        end)
+
+        if decodeSuccess and type(assetItems) == "table" then
+            for _, item in ipairs(assetItems) do
+                if item.type == "file" and item.download_url and item.name then
+                    local targetPath = "Shell/Assets/" .. item.name
+                    if not checkFile(targetPath) then
+                        local fileContent = fetch(item.download_url)
+                        if fileContent and writefile then
+                            writefile(targetPath, fileContent)
+                        end
+                    end
+                end
+            end
+        else
+            warn("[Shell Setup]: Failed to parse GitHub API JSON response for Assets.")
+        end
+    else
+        warn("[Shell Setup]: Failed to fetch Assets directory list from GitHub API.")
+    end
+end
+
+local function fetchRemote(url)
+    local success, content = pcall(function()
+        return game:HttpGet(url)
+    end)
+    if success and content then
+        return content
+    end
+    return nil
+end
 
 local function showCoreNotification(title, text, duration)
     pcall(function()
@@ -28,6 +139,7 @@ local function logDev(msg)
         _G.ShellLog("[Dev]: " .. tostring(msg), "developer")
     end
 end
+
 local function devlog(msg)
     logDev(msg)
 end
@@ -64,6 +176,8 @@ local function parseCommandString(str)
     local cmdName = table.remove(arguments, 1)
     return cmdName, arguments
 end
+
+loadShellAssets()
 
 local function getAutoexecLines()
     if not isfile or not isfile("Shell/Core/autoexec.csv") then 
@@ -122,9 +236,10 @@ showCoreNotification("Shell", "Initializing...", 5)
 function compiler.Refresh()
     compiler.Functions = {}
     
-    if isfile and isfile("Shell/Core/functions.lua") then
+    local funcCode = fetchRemote(funcPath)
+    if funcCode then
         local success, funcModule = pcall(function()
-            return loadstring(readfile("Shell/Core/functions.lua"))()
+            return loadstring(funcCode)()
         end)
         
         if success and type(funcModule) == "table" then
@@ -135,7 +250,7 @@ function compiler.Refresh()
             logError("Failed to load functions.lua: " .. tostring(funcModule))
         end
     else
-        logError("functions.lua not found")
+        logError("functions.lua could not be fetched from GitHub")
     end
     
     -- CORE COMMAND REGISTRATION
@@ -177,8 +292,13 @@ function compiler.Refresh()
             end
             showCoreNotification("Shell", "Relaunching shell...", 5)
             task.wait(0.5)
-            local success, err = pcall(function() loadstring(readfile("Shell/Core/compiler.lua"))() end)
-            if err then warn(err) end
+            local compilerCode = fetchRemote(compilerPath)
+            if compilerCode then
+                local success, err = pcall(function() loadstring(compilerCode)() end)
+                if err then warn(err) end
+            else
+                logError("Failed to fetch compiler.lua during relaunch")
+            end
         end
     }
     
@@ -305,7 +425,6 @@ function compiler.Refresh()
             local url = table.concat(args, " ")
             url = string.gsub(url, "^%s*(.-)%s*$", "%1")
 
-            -- Helper function to read lines from imported.csv
             local function getImportedLines()
                 local lines = {}
                 local csvPath = "Shell/Core/imported.csv"
@@ -322,7 +441,6 @@ function compiler.Refresh()
                 return lines
             end
 
-            -- Helper function to save lines back to imported.csv
             local function saveImportedLines(lines)
                 local csvPath = "Shell/Core/imported.csv"
                 local content = table.concat(lines, "\n")
@@ -437,15 +555,16 @@ end
 compiler.Refresh()
 
 -- 2. Load UI layer FIRST (so UI globals like _G.SelectTheme exist)
-if isfile and isfile("Shell/Core/ui.lua") then
+local uiCode = fetchRemote(uiPath)
+if uiCode then
     local success, err = pcall(function()
-        loadstring(readfile("Shell/Core/ui.lua"))()
+        loadstring(uiCode)()
     end)
     if not success then
         logError("Failed to load ui.lua: " .. tostring(err))
     end
 else
-    logError("ui.lua not found")
+    logError("ui.lua could not be fetched from GitHub")
 end
 
 -- Push commands to UI after it is initialized
