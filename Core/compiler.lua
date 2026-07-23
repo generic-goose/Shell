@@ -353,7 +353,7 @@ function compiler.Refresh()
                 log("[" .. cat .. " (" .. #cmds .. ")]: " .. table.concat(cmds, ", "))
             end
             log("--------------------")
-            log("This list is extensive to all currently loaded commands. If you expected to see a command here, try using the 'refresh' command to refresh the list.")
+            log("This list is extensive to all currently loaded commands. If you expected to see a command here, try using the 'refresh' command to refresh the list.\n\nJoin the Shell Discord for more support.\nhttps://discord.gg/jBW96MNauQ")
         end
     }
     
