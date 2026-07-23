@@ -60,6 +60,8 @@ Functions["rejoin"] = {
     end
 }
 
+logFunc("Join the Shell Discord!\nhttps://discord.gg/jBW96MNauQ")
+    
 Functions["discord"] = {
     Name = "discord",
     Arguments = {},
