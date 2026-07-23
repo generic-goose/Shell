@@ -31,7 +31,6 @@ local function loadShellAssets()
         end
     end
 
-    -- Helper functions to safely check file and folder existence
     local function checkFolder(path)
         return isfolder and isfolder(path) or false
     end
@@ -84,34 +83,46 @@ local function loadShellAssets()
         end
     end
 
-    -- Download missing assets from GitHub API
+    -- Recursive helper function to fetch GitHub directory contents
     local HttpService = game:GetService("HttpService")
-    local assetsApiUrl = "https://api.github.com/repos/generic-goose/Shell/contents/Assets"
-    local assetsJsonResponse = fetch(assetsApiUrl)
+    
+    local function fetchGithubDirectory(repoPath, localPath)
+        local apiUrl = "https://api.github.com/repos/generic-goose/Shell/contents/" .. repoPath
+        local jsonResponse = fetch(apiUrl)
 
-    if assetsJsonResponse then
-        local decodeSuccess, assetItems = pcall(function()
-            return HttpService:JSONDecode(assetsJsonResponse)
+        if not jsonResponse then
+            warn("[Shell Setup]: Failed to fetch directory contents for: " .. repoPath)
+            return
+        end
+
+        local decodeSuccess, items = pcall(function()
+            return HttpService:JSONDecode(jsonResponse)
         end)
 
-        if decodeSuccess and type(assetItems) == "table" then
-            for _, item in ipairs(assetItems) do
-                if item.type == "file" and item.download_url and item.name then
-                    local targetPath = "Shell/Assets/" .. item.name
+        if decodeSuccess and type(items) == "table" then
+            for _, item in ipairs(items) do
+                local targetPath = localPath .. "/" .. item.name
+
+                if item.type == "file" and item.download_url then
                     if not checkFile(targetPath) then
                         local fileContent = fetch(item.download_url)
                         if fileContent and writefile then
                             writefile(targetPath, fileContent)
                         end
                     end
+                elseif item.type == "dir" then
+                    -- Create the subfolder locally and recurse into it
+                    ensureFolder(targetPath)
+                    fetchGithubDirectory(repoPath .. "/" .. item.name, targetPath)
                 end
             end
         else
-            warn("[Shell Setup]: Failed to parse GitHub API JSON response for Assets.")
+            warn("[Shell Setup]: Failed to parse GitHub API JSON response for: " .. repoPath)
         end
-    else
-        warn("[Shell Setup]: Failed to fetch Assets directory list from GitHub API.")
     end
+
+    -- Start fetching recursively from Assets
+    fetchGithubDirectory("Assets", "Shell/Assets")
 end
 
 local function fetchRemote(url)
