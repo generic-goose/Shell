@@ -60,4 +60,13 @@ Functions["rejoin"] = {
     end
 }
 
+Functions["discord"] = {
+    Name = "discord",
+    Arguments = {},
+    Category = "Shell",
+    Function = function()
+        logFunc("https://discord.gg/jBW96MNauQ", "default")
+    end
+}
+
 return Functions
