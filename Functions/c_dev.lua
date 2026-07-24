@@ -180,18 +180,13 @@ Functions["cobalt"] = {
     Arguments = {},
     Category = "Developer",
     Function = function()
-        logFunc("Loading Cobalt...", "default")
+        logFunc("Loading Dex Explorer...", "default")
+        local success, err = pcall(function()
+            loadstring(game:HttpGet("https://github.com/notpoiu/cobalt/releases/latest/download/Cobalt.luau"))()
+        end)
         
-        if isfile and isfile("Shell/Assets/cobalt.lua") then
-            local success, err = pcall(function()
-                loadstring(readfile("Shell/Assets/cobalt.lua"))()
-            end)
-            
-            if not success then
-                logFunc("Failed to execute cobalt.lua: " .. tostring(err), "error")
-            end
-        else
-            logFunc("File 'Shell/Assets/cobalt.lua' not found.", "warn")
+        if not success then
+            logFunc("Failed to load Dex: " .. tostring(err), "error")
         end
     end
 }
