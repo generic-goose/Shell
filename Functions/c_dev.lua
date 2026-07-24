@@ -180,13 +180,13 @@ Functions["cobalt"] = {
     Arguments = {},
     Category = "Developer",
     Function = function()
-        logFunc("Loading Dex Explorer...", "default")
+        logFunc("Loading Cobalt...", "default")
         local success, err = pcall(function()
             loadstring(game:HttpGet("https://github.com/notpoiu/cobalt/releases/latest/download/Cobalt.luau"))()
         end)
         
         if not success then
-            logFunc("Failed to load Dex: " .. tostring(err), "error")
+            logFunc("Failed to load Cobalt: " .. tostring(err), "error")
         end
     end
 }
