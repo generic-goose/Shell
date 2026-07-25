@@ -1,6 +1,7 @@
 <h1>Shell Console</h1>
-Shell is a small project focused on command-centered functions and easy customization and additions.<newline>
-Join our Discord: https://discord.gg/jBW96MNauQ
+Shell is a small project focused on command-centered functions and easy customization and additions.
+<h3>Discord</h3>
+Join our Discord here: https://discord.gg/jBW96MNauQ
 <h3>Addons</h2>
 Addons can be loadstring or files, uploaded directly to the Shell interface or via the import function and a github repo. Almost every part of Shell can be customized or changed with Themes and Addons, making it easy to make new tools and functions.
 <h3>Themes</h2>
