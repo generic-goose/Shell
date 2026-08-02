@@ -284,14 +284,21 @@ function compiler.Refresh()
         Arguments = {},
         Category = "Core",
         Function = function()
-            log("Generating script for game "..game.PlaceId)
+            -- Replaced 'log' with 'print' (or ensure your custom log function is defined elsewhere)
+            print("Generating script for game " .. tostring(game.PlaceId)) 
+            
             local importedUrl = "https://raw.githubusercontent.com/generic-goose/Shell/refs/heads/main/Assets/template.lua"
-            local importedData = fetch(importedUrl)
-            if importedData then
-                writefile("Shell/Games/"..game.PlaceId..".lua", importedData)
+            
+            -- Wrap in pcall or use game:HttpGet instead of 'fetch'
+            local success, importedData = pcall(function()
+                return game:HttpGet(importedUrl)
+            end)
+            
+            if success and importedData then
+                writefile("Shell/Games/" .. game.PlaceId .. ".lua", importedData)
             else
                 warn("[Shell Setup]: Failed to download template.lua from GitHub")
-                writefile("Shell/Games/"..game.PlaceId..".lua", "-- The template failed to download from GitHub, you can find it with this link: https://raw.githubusercontent.com/generic-goose/Shell/refs/heads/main/Assets/template.lua")
+                writefile("Shell/Games/" .. game.PlaceId .. ".lua", "-- The template failed to download from GitHub, you can find it with this link: https://raw.githubusercontent.com/generic-goose/Shell/refs/heads/main/Assets/template.lua")
             end
         end
     }
