@@ -285,7 +285,14 @@ function compiler.Refresh()
         Category = "Core",
         Function = function()
             log("Generating script for game "..game.PlaceId)
-            writefile("Shell/Games/"..game.PlaceId..".lua", "")
+            local importedUrl = "https://raw.githubusercontent.com/generic-goose/Shell/refs/heads/main/Assets/template.lua"
+            local importedData = fetch(importedUrl)
+            if importedData then
+                writefile("Shell/Games/"..game.PlaceId..".lua", importedData)
+            else
+                warn("[Shell Setup]: Failed to download template.lua from GitHub")
+                writefile("Shell/Games/"..game.PlaceId..".lua", "-- The template failed to download from GitHub, you can find it with this link: https://raw.githubusercontent.com/generic-goose/Shell/refs/heads/main/Assets/template.lua")
+            end
         end
     }
     
