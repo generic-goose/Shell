@@ -278,6 +278,16 @@ function compiler.Refresh()
             showCoreNotification("Shell", "Thanks for using the Shell, goodbye!", 5)
         end
     }
+        
+    compiler.Functions["gamegen"] = {
+        Name = "gamegen",
+        Arguments = {},
+        Category = "Core",
+        Function = function()
+            log("Generating script for game "..game.PlaceId)
+            writefile("Shell/Games/"..game.PlaceId..".lua", "")
+        end
+    }
     
     compiler.Functions["_shelldev"] = {
         Name = "_shelldev",
