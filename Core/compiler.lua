@@ -15,23 +15,39 @@ local funcPath = BASE_URL .. "Core/functions.lua"
 local uiPath = BASE_URL .. "Core/ui.lua"
 
 local function fetchRemote(url)
-    local ok, res = pcall(game.HttpGet, game, url)
+    local ok, res = pcall(function()
+        return game:HttpGet(url)
+    end)
     return ok and res or nil
 end
 
+local function safeLoadString(code, chunkName)
+    local fn, err = loadstring(code, chunkName)
+    if not fn then
+        return false, err
+    end
+    return pcall(fn)
+end
+
 local function showCoreNotification(title, text, duration)
-    pcall(StarterGui.SetCore, StarterGui, "SendNotification", {
-        Title = title or "Notification",
-        Text = text or "notification text :D",
-        Duration = duration or 5
-    })
+    pcall(function()
+        StarterGui:SetCore("SendNotification", {
+            Title = title or "Notification",
+            Text = text or "notification text :D",
+            Duration = duration or 5
+        })
+    end)
 end
 
 local function logTo(prefix, msg, category)
     if _G.ShellLog then
         _G.ShellLog(prefix .. tostring(msg), category)
     else
-        (category == "error" or category == "warn") and warn(prefix .. tostring(msg)) or print(prefix .. tostring(msg))
+        if category == "error" or category == "warn" then
+            warn(prefix .. tostring(msg))
+        else
+            print(prefix .. tostring(msg))
+        end
     end
 end
 
@@ -95,7 +111,10 @@ local function loadShellAssets()
         local json = fetchRemote("https://api.github.com/repos/generic-goose/Shell/contents/" .. repoPath)
         if not json then return end
 
-        local ok, items = pcall(HttpService.JSONDecode, HttpService, json)
+        local ok, items = pcall(function()
+            return HttpService:JSONDecode(json)
+        end)
+
         if ok and type(items) == "table" then
             for _, item in ipairs(items) do
                 local targetPath = localPath .. "/" .. item.name
@@ -171,7 +190,7 @@ function compiler.Refresh()
     
     local funcCode = fetchRemote(funcPath)
     if funcCode then
-        local ok, funcModule = pcall(loadstring(funcCode))
+        local ok, funcModule = safeLoadString(funcCode, "functions.lua")
         if ok and type(funcModule) == "table" then
             for k, v in pairs(funcModule) do compiler.Functions[k] = v end
         else
@@ -228,8 +247,8 @@ function compiler.Refresh()
             task.wait(0.5)
             local compilerCode = fetchRemote(compilerPath)
             if compilerCode then
-                local ok, err = pcall(loadstring(compilerCode))
-                if err then warn(err) end
+                local ok, err = safeLoadString(compilerCode, "compiler.lua")
+                if not ok then warn(err) end
             else
                 logError("Failed to fetch compiler.lua during relaunch")
             end
@@ -362,7 +381,7 @@ compiler.Refresh()
 
 local uiCode = fetchRemote(uiPath)
 if uiCode then
-    local ok, err = pcall(loadstring(uiCode))
+    local ok, err = safeLoadString(uiCode, "ui.lua")
     if not ok then logError("Failed to load ui.lua: " .. tostring(err)) end
 else
     logError("ui.lua could not be fetched from GitHub")
