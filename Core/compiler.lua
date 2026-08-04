@@ -341,7 +341,10 @@ function compiler.Refresh()
         Name = "clear",
         Arguments = {},
         Category = "Core",
-        Function = function()
+        Function = function()           
+            if writefile then
+                writefile("Shell/Core/log.txt", "-- Start of Log --")
+            end
             if _G.ShellClearConsole then
                 _G.ShellClearConsole()
             else
