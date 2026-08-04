@@ -1,5 +1,4 @@
-local compiler = {}
-compiler.Functions = {}
+local compiler = {Functions = {}}
 
 _G.ShellRunning = true
 _G.ShellDev = false
@@ -8,39 +7,58 @@ _G.ShellKeybinds = _G.ShellKeybinds or {}
 
 local UserInputService = game:GetService("UserInputService")
 local StarterGui = game:GetService("StarterGui")
+local HttpService = game:GetService("HttpService")
 
-local compilerPath = "https://raw.githubusercontent.com/generic-goose/Shell/refs/heads/main/Core/compiler.lua"
-local funcPath = "https://raw.githubusercontent.com/generic-goose/Shell/refs/heads/main/Core/functions.lua"
-local uiPath = "https://raw.githubusercontent.com/generic-goose/Shell/refs/heads/main/Core/ui.lua"
+local BASE_URL = "https://raw.githubusercontent.com/generic-goose/Shell/refs/heads/main/"
+local compilerPath = BASE_URL .. "Core/compiler.lua"
+local funcPath = BASE_URL .. "Core/functions.lua"
+local uiPath = BASE_URL .. "Core/ui.lua"
 
--- =========================================================
--- HELPER FUNCTIONS
--- =========================================================
+local function fetchRemote(url)
+    local ok, res = pcall(game.HttpGet, game, url)
+    return ok and res or nil
+end
+
+local function showCoreNotification(title, text, duration)
+    pcall(StarterGui.SetCore, StarterGui, "SendNotification", {
+        Title = title or "Notification",
+        Text = text or "notification text :D",
+        Duration = duration or 5
+    })
+end
+
+local function logTo(prefix, msg, category)
+    if _G.ShellLog then
+        _G.ShellLog(prefix .. tostring(msg), category)
+    else
+        (category == "error" or category == "warn") and warn(prefix .. tostring(msg)) or print(prefix .. tostring(msg))
+    end
+end
+
+local function log(msg) logTo("[Core]: ", msg, "default") end
+local function logDev(msg) logTo("[Dev]: ", msg, "developer") end
+local function logError(msg) logTo("[Core Error]: ", msg, "error") end
+local function logWarn(msg) logTo("[Core Warn]: ", msg, "warn") end
+
+local function parseCommandString(str)
+    local args = {}
+    for arg in str:gmatch("[^%s]+") do
+        table.insert(args, arg)
+    end
+    return table.remove(args, 1), args
+end
+
+local function ensureFolder(path)
+    if makefolder and isfolder and not isfolder(path) then
+        pcall(makefolder, path)
+    end
+end
+
+local function checkFolder(path) return isfolder and isfolder(path) end
+local function checkFile(path) return isfile and isfile(path) end
 
 local function loadShellAssets()
-    local function fetch(url)
-        local success, result = pcall(function()
-            return game:HttpGet(url)
-        end)
-        return success and result or nil
-    end
-
-    local function ensureFolder(path)
-        if makefolder and isfolder and not isfolder(path) then
-            pcall(function() makefolder(path) end)
-        end
-    end
-
-    local function checkFolder(path)
-        return isfolder and isfolder(path) or false
-    end
-
-    local function checkFile(path)
-        return isfile and isfile(path) or false
-    end
-
-    -- Verify that all required directories and files are present
-    local allDependenciesExist = checkFolder("Shell")
+    local ready = checkFolder("Shell")
         and checkFolder("Shell/Assets")
         and checkFolder("Shell/Core")
         and checkFolder("Shell/Functions")
@@ -52,187 +70,95 @@ local function loadShellAssets()
         and checkFile("Shell/Core/autoexec.csv")
         and checkFile("Shell/Assets/example.lua")
 
-    if allDependenciesExist then
-        return
+    if ready then return end
+
+    print("[Shell Setup]: Initializing missing workspace structure and assets...")
+
+    for _, path in ipairs({
+        "Shell", "Shell/Core", "Shell/Assets", 
+        "Shell/Assets/Themes", "Shell/Games", "Shell/Functions"
+    }) do
+        ensureFolder(path)
     end
 
-    print("[Shell Setup]: Initializing missing 'Shell' workspace structure and assets...")
-
-    -- Create directory structure
-    ensureFolder("Shell")
-    ensureFolder("Shell/Core")
-    ensureFolder("Shell/Assets")
-    ensureFolder("Shell/Assets/Themes")
-    ensureFolder("Shell/Games")
-    ensureFolder("Shell/Functions")
-
-    -- Ensure Core files exist
     if writefile then
         if not checkFile("Shell/Core/imported.csv") then
-            local importedUrl = "https://raw.githubusercontent.com/generic-goose/Shell/refs/heads/main/Core/imported.csv"
-            local importedData = fetch(importedUrl)
-            if importedData then
-                writefile("Shell/Core/imported.csv", importedData)
-            else
-                warn("[Shell Setup]: Failed to download imported.csv from GitHub")
-            end
+            local importedData = fetchRemote(BASE_URL .. "Core/imported.csv")
+            writefile("Shell/Core/imported.csv", importedData or "")
         end
-
         if not checkFile("Shell/Core/autoexec.csv") then
             writefile("Shell/Core/autoexec.csv", "")
         end
     end
 
-    -- Recursive helper function to fetch GitHub directory contents
-    local HttpService = game:GetService("HttpService")
-    
     local function fetchGithubDirectory(repoPath, localPath)
-        local apiUrl = "https://api.github.com/repos/generic-goose/Shell/contents/" .. repoPath
-        local jsonResponse = fetch(apiUrl)
+        local json = fetchRemote("https://api.github.com/repos/generic-goose/Shell/contents/" .. repoPath)
+        if not json then return end
 
-        if not jsonResponse then
-            warn("[Shell Setup]: Failed to fetch directory contents for: " .. repoPath)
-            return
-        end
-
-        local decodeSuccess, items = pcall(function()
-            return HttpService:JSONDecode(jsonResponse)
-        end)
-
-        if decodeSuccess and type(items) == "table" then
+        local ok, items = pcall(HttpService.JSONDecode, HttpService, json)
+        if ok and type(items) == "table" then
             for _, item in ipairs(items) do
                 local targetPath = localPath .. "/" .. item.name
-
                 if item.type == "file" and item.download_url then
                     if not checkFile(targetPath) then
-                        local fileContent = fetch(item.download_url)
-                        if fileContent and writefile then
-                            writefile(targetPath, fileContent)
-                        end
+                        local content = fetchRemote(item.download_url)
+                        if content and writefile then writefile(targetPath, content) end
                     end
                 elseif item.type == "dir" then
-                    -- Create the subfolder locally and recurse into it
                     ensureFolder(targetPath)
                     fetchGithubDirectory(repoPath .. "/" .. item.name, targetPath)
                 end
             end
-        else
-            warn("[Shell Setup]: Failed to parse GitHub API JSON response for: " .. repoPath)
         end
     end
 
-    -- Start fetching recursively from Assets
     fetchGithubDirectory("Assets", "Shell/Assets")
 end
 
-local function fetchRemote(url)
-    local success, content = pcall(function()
-        return game:HttpGet(url)
-    end)
-    if success and content then
-        return content
-    end
-    return nil
-end
-
-local function showCoreNotification(title, text, duration)
-    pcall(function()
-        StarterGui:SetCore("SendNotification", {
-            Title = title or "Notification",
-            Text = text or "notification text :D",
-            Duration = duration or 5
-        })
-    end)
-end
-
-local function logDev(msg)
-    if _G.ShellLog then
-        _G.ShellLog("[Dev]: " .. tostring(msg), "developer")
-    end
-end
-
-local function devlog(msg)
-    logDev(msg)
-end
-
-local function log(msg)
-    if _G.ShellLog then
-        _G.ShellLog("[Core]: " .. tostring(msg), "default")
-    else
-        print("[Core] (UI Log Missing): " .. tostring(msg))
-    end
-end
-
-local function logWarn(msg)
-    if _G.ShellLog then
-        _G.ShellLog("[Core Warn]: " .. tostring(msg), "warn")
-    else
-        warn("[Core Warn] (UI Log Missing): " .. tostring(msg))
-    end
-end
-
-local function logError(msg)
-    if _G.ShellLog then
-        _G.ShellLog("[Core Error]: " .. tostring(msg), "error")
-    else
-        warn("[Core Error] (UI Log Missing): " .. tostring(msg))
-    end
-end
-
-local function parseCommandString(str)
-    local arguments = {}
-    for argument in string.gmatch(str, "[^%s]+") do
-        table.insert(arguments, argument)
-    end
-    local cmdName = table.remove(arguments, 1)
-    return cmdName, arguments
-end
-
-loadShellAssets()
-
-local function getAutoexecLines()
-    if not isfile or not isfile("Shell/Core/autoexec.csv") then 
-        return {} 
-    end
-    
-    local content = readfile("Shell/Core/autoexec.csv")
+local function getLines(path)
+    if not isfile or not checkFile(path) then return {} end
     local lines = {}
-    for line in string.gmatch(content, "[^\r\n]+") do
-        local cleanLine = string.gsub(line, "^%s*(.-)%s*$", "%1")
-        if cleanLine ~= "" then
-            table.insert(lines, cleanLine)
-        end
+    for line in readfile(path):gmatch("[^\r\n]+") do
+        local clean = line:match("^%s*(.-)%s*$")
+        if clean ~= "" then table.insert(lines, clean) end
     end
     return lines
 end
 
-local function saveAutoexecLines(lines)
+local function toggleCsvLine(path, value, tag)
+    local lines = getLines(path)
+    local foundIdx
+    for i, line in ipairs(lines) do
+        if line == value then
+            foundIdx = i
+            break
+        end
+    end
+
+    if foundIdx then
+        table.remove(lines, foundIdx)
+        log("Removed '" .. value .. "' from " .. tag .. ".")
+    else
+        table.insert(lines, value)
+        log("Added '" .. value .. "' to " .. tag .. ".")
+    end
+
     if writefile then
-        writefile("Shell/Core/autoexec.csv", table.concat(lines, "\n"))
+        writefile(path, table.concat(lines, "\n"))
     end
 end
 
--- =========================================================
--- KEYBIND LISTENER
--- =========================================================
-
 if not _G.ShellKeybindConnection then
-    _G.ShellKeybindConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
-        if gameProcessed then return end
-        if input.UserInputType == Enum.UserInputType.Keyboard then
-            local keyName = input.KeyCode.Name
-            local boundLine = _G.ShellKeybinds[keyName]
-            
-            if boundLine and _G.ShellRunning then
-                local cmdName, args = parseCommandString(boundLine)
-                local cmdData = _G.ShellFunctions and _G.ShellFunctions[cmdName]
-                
-                if cmdData and type(cmdData.Function) == "function" then
-                    local success, err = pcall(cmdData.Function, unpack(args))
-                    if not success then
-                        warn("[Shell Bind Error]: " .. tostring(err))
-                    end
-                end
+    _G.ShellKeybindConnection = UserInputService.InputBegan:Connect(function(input, processed)
+        if processed or input.UserInputType ~= Enum.UserInputType.Keyboard or not _G.ShellRunning then return end
+        
+        local boundLine = _G.ShellKeybinds[input.KeyCode.Name]
+        if boundLine then
+            local cmdName, args = parseCommandString(boundLine)
+            local cmdData = _G.ShellFunctions and _G.ShellFunctions[cmdName]
+            if cmdData and type(cmdData.Function) == "function" then
+                local ok, err = pcall(cmdData.Function, unpack(args))
+                if not ok then warn("[Shell Bind Error]: " .. tostring(err)) end
             end
         end
     end)
@@ -240,35 +166,25 @@ end
 
 showCoreNotification("Shell", "Initializing...", 5)
 
--- =========================================================
--- COMPILER REFRESH
--- =========================================================
-
 function compiler.Refresh()
     compiler.Functions = {}
     
     local funcCode = fetchRemote(funcPath)
     if funcCode then
-        local success, funcModule = pcall(function()
-            return loadstring(funcCode)()
-        end)
-        
-        if success and type(funcModule) == "table" then
-            for k, v in pairs(funcModule) do
-                compiler.Functions[k] = v
-            end
+        local ok, funcModule = pcall(loadstring(funcCode))
+        if ok and type(funcModule) == "table" then
+            for k, v in pairs(funcModule) do compiler.Functions[k] = v end
         else
             logError("Failed to load functions.lua: " .. tostring(funcModule))
         end
     else
         logError("functions.lua could not be fetched from GitHub")
     end
-    
-    -- CORE COMMAND REGISTRATION
-    compiler.Functions["exit"] = {
-        Name = "exit",
-        Arguments = {},
-        Category = "Core",
+
+    local cmds = compiler.Functions
+
+    cmds["exit"] = {
+        Name = "exit", Arguments = {}, Category = "Core",
         Function = function()
             _G.ShellRunning = false
             if _G.ShellUI then
@@ -278,73 +194,52 @@ function compiler.Refresh()
             showCoreNotification("Shell", "Thanks for using the Shell, goodbye!", 5)
         end
     }
-        
-    compiler.Functions["gamegen"] = {
-        Name = "gamegen",
-        Arguments = {},
-        Category = "Core",
+
+    cmds["gamegen"] = {
+        Name = "gamegen", Arguments = {}, Category = "Core",
         Function = function()
-            -- Replaced 'log' with 'print' (or ensure your custom log function is defined elsewhere)
-            print("Generating script for game " .. tostring(game.PlaceId)) 
-            
-            local importedUrl = "https://raw.githubusercontent.com/generic-goose/Shell/refs/heads/main/Assets/template.lua"
-            
-            -- Wrap in pcall or use game:HttpGet instead of 'fetch'
-            local success, importedData = pcall(function()
-                return game:HttpGet(importedUrl)
-            end)
-            
-            if success and importedData then
-                writefile("Shell/Games/" .. game.PlaceId .. ".lua", importedData)
+            print("Generating script for game " .. tostring(game.PlaceId))
+            local data = fetchRemote(BASE_URL .. "Assets/template.lua")
+            local filePath = "Shell/Games/" .. game.PlaceId .. ".lua"
+            if data then
+                writefile(filePath, data)
             else
                 warn("[Shell Setup]: Failed to download template.lua from GitHub")
-                writefile("Shell/Games/" .. game.PlaceId .. ".lua", "-- The template failed to download from GitHub, you can find it with this link: https://raw.githubusercontent.com/generic-goose/Shell/refs/heads/main/Assets/template.lua")
+                writefile(filePath, "-- Template failed to download: " .. BASE_URL .. "Assets/template.lua")
             end
         end
     }
-    
-    compiler.Functions["_shelldev"] = {
-        Name = "_shelldev",
-        Arguments = {},
-        Category = "Hidden",
+
+    cmds["_shelldev"] = {
+        Name = "_shelldev", Arguments = {}, Category = "Hidden",
         Function = function()
             _G.ShellDev = not _G.ShellDev
-            logDev((_G.ShellDev and "Enabled" or "Disabled") .." Shell Developer Mode")
+            logDev((_G.ShellDev and "Enabled" or "Disabled") .. " Shell Developer Mode")
             compiler.Refresh()
             showCoreNotification("Shell Developer", "Shell Developer Mode is now " .. (_G.ShellDev and "enabled" or "disabled") .. ".", 5)
         end
     }
-    
-    compiler.Functions["relaunch"] = {
-        Name = "relaunch",
-        Arguments = {},
-        Category = "Core",
+
+    cmds["relaunch"] = {
+        Name = "relaunch", Arguments = {}, Category = "Core",
         Function = function()
-            _G.ShellRunning = false
-            if _G.ShellUI then
-                pcall(function() _G.ShellUI:Destroy() end)
-                _G.ShellUI = nil
-            end
+            cmds["exit"].Function()
             showCoreNotification("Shell", "Relaunching shell...", 5)
             task.wait(0.5)
             local compilerCode = fetchRemote(compilerPath)
             if compilerCode then
-                local success, err = pcall(function() loadstring(compilerCode)() end)
+                local ok, err = pcall(loadstring(compilerCode))
                 if err then warn(err) end
             else
                 logError("Failed to fetch compiler.lua during relaunch")
             end
         end
     }
-    
-    compiler.Functions["clear"] = {
-        Name = "clear",
-        Arguments = {},
-        Category = "Core",
-        Function = function()           
-            if writefile then
-                writefile("Shell/Core/log.txt", "-- Start of Log --")
-            end
+
+    cmds["clear"] = {
+        Name = "clear", Arguments = {}, Category = "Core",
+        Function = function()
+            if writefile then writefile("Shell/Core/log.txt", "-- Start of Log --") end
             if _G.ShellClearConsole then
                 _G.ShellClearConsole()
             else
@@ -352,205 +247,92 @@ function compiler.Refresh()
             end
         end
     }
-    
-    compiler.Functions["help"] = {
-        Name = "help",
-        Arguments = {},
-        Category = "Core",
+
+    cmds["help"] = {
+        Name = "help", Arguments = {}, Category = "Core",
         Function = function()
             log("--- Command List ---")
             local categorized = {}
-            for _, cmd in pairs(compiler.Functions) do
+            for _, cmd in pairs(cmds) do
                 if cmd.Category ~= "Hidden" then
                     local cat = cmd.Category or "Uncategorized"
                     categorized[cat] = categorized[cat] or {}
                     table.insert(categorized[cat], cmd.Name)
                 end
             end
-            
+
             local sortedCategories = {}
-            for cat in pairs(categorized) do
-                table.insert(sortedCategories, cat)
-            end
+            for cat in pairs(categorized) do table.insert(sortedCategories, cat) end
             table.sort(sortedCategories)
-            
+
             for _, cat in ipairs(sortedCategories) do
-                local cmds = categorized[cat]
-                table.sort(cmds)
-                log("[" .. cat .. " (" .. #cmds .. ")]: " .. table.concat(cmds, ", "))
+                local list = categorized[cat]
+                table.sort(list)
+                log("[" .. cat .. " (" .. #list .. ")]: " .. table.concat(list, ", "))
             end
             log("--------------------")
             log("This list is extensive to all currently loaded commands. If you expected to see a command here, try using the 'refresh' command to refresh the list.\n\nJoin the Shell Discord for more support.\nhttps://discord.gg/jBW96MNauQ")
         end
     }
-    
-    compiler.Functions["refresh"] = {
-        Name = "refresh",
-        Arguments = {},
-        Category = "Core",
-        Function = compiler.Refresh
-    }
 
-    compiler.Functions["theme"] = {
-        Name = "theme",
-        Arguments = {"ThemeName"},
-        Category = "Core",
+    cmds["refresh"] = { Name = "refresh", Arguments = {}, Category = "Core", Function = compiler.Refresh }
+
+    cmds["theme"] = {
+        Name = "theme", Arguments = {"ThemeName"}, Category = "Core",
         Function = function(themeName)
-            if not themeName or themeName == "" then
-                return "Current theme: " .. tostring(_G.ShellTheme)
-            end
-
+            if not themeName or themeName == "" then return "Current theme: " .. tostring(_G.ShellTheme) end
             if type(_G.SelectTheme) == "function" then
-                local success = _G.SelectTheme(themeName)
-                if success then
-                    log("Theme changed to '" .. themeName .. "'.")
-                else
-                    logError("Failed to load theme '" .. themeName .. "'.")
-                end
+                log(_G.SelectTheme(themeName) and ("Theme changed to '" .. themeName .. "'.") or ("Failed to load theme '" .. themeName .. "'."))
             else
                 logError("Error: Shell UI theme switcher not initialized.")
             end
         end
     }
 
-    compiler.Functions["autoexec"] = {
-        Name = "autoexec",
-        Arguments = {"..."},
-        Category = "Core",
+    cmds["autoexec"] = {
+        Name = "autoexec", Arguments = {"..."}, Category = "Core",
         Function = function(...)
             local args = {...}
-            if #args == 0 then
-                logError("autoexec requires a command line string as an argument.")
-                return
-            end
-
-            local fullLine = table.concat(args, " ")
-            fullLine = string.gsub(fullLine, "^%s*(.-)%s*$", "%1")
-            
-            local lines = getAutoexecLines()
-            local foundIndex = nil
-
-            for i, line in ipairs(lines) do
-                if line == fullLine then
-                    foundIndex = i
-                    break
-                end
-            end
-
-            if foundIndex then
-                table.remove(lines, foundIndex)
-                log("Removed '" .. fullLine .. "' from autoexec sequence.")
-            else
-                table.insert(lines, fullLine)
-                log("Added '" .. fullLine .. "' to autoexec sequence.")
-            end
-
-            saveAutoexecLines(lines)
-        end
-    }    
-    
-    compiler.Functions["import"] = {
-        Name = "import",
-        Arguments = {"URL"},
-        Category = "Core",
-        Function = function(...)
-            local args = {...}
-            if #args == 0 then
-                logError("import requires a URL link as an argument.")
-                return
-            end
-
-            local url = table.concat(args, " ")
-            url = string.gsub(url, "^%s*(.-)%s*$", "%1")
-
-            local function getImportedLines()
-                local lines = {}
-                local csvPath = "Shell/Core/imported.csv"
-                
-                if isfile and isfile(csvPath) then
-                    local content = readfile(csvPath)
-                    for line in content:gmatch("[^\r\n]+") do
-                        local trimmed = string.gsub(line, "^%s*(.-)%s*$", "%1")
-                        if trimmed ~= "" then
-                            table.insert(lines, trimmed)
-                        end
-                    end
-                end
-                return lines
-            end
-
-            local function saveImportedLines(lines)
-                local csvPath = "Shell/Core/imported.csv"
-                local content = table.concat(lines, "\n")
-                if writefile then
-                    writefile(csvPath, content)
-                end
-            end
-
-            local lines = getImportedLines()
-            local foundIndex = nil
-
-            for i, line in ipairs(lines) do
-                if line == url then
-                    foundIndex = i
-                    break
-                end
-            end
-
-            if foundIndex then
-                table.remove(lines, foundIndex)
-                log("Removed '" .. url .. "' from imported.csv.")
-            else
-                table.insert(lines, url)
-                log("Added '" .. url .. "' to imported.csv.")
-            end
-
-            saveImportedLines(lines)
+            if #args == 0 then return logError("autoexec requires a command line string as an argument.") end
+            toggleCsvLine("Shell/Core/autoexec.csv", table.concat(args, " "):match("^%s*(.-)%s*$"), "autoexec sequence")
         end
     }
 
-    compiler.Functions["autoexeclist"] = {
-        Name = "autoexeclist",
-        Arguments = {},
-        Category = "Core",
+    cmds["import"] = {
+        Name = "import", Arguments = {"URL"}, Category = "Core",
+        Function = function(...)
+            local args = {...}
+            if #args == 0 then return logError("import requires a URL link as an argument.") end
+            toggleCsvLine("Shell/Core/imported.csv", table.concat(args, " "):match("^%s*(.-)%s*$"), "imported.csv")
+        end
+    }
+
+    cmds["autoexeclist"] = {
+        Name = "autoexeclist", Arguments = {}, Category = "Core",
         Function = function()
             log("--- Autoexec List ---")
-            local cmds = getAutoexecLines()
-            for _, cmd in ipairs(cmds) do
-                log("- " .. cmd)
-            end
+            for _, cmd in ipairs(getLines("Shell/Core/autoexec.csv")) do log("- " .. cmd) end
             log("---------------------")
             log("This list is extensive to all currently loaded auto executions.")
         end
     }
 
-    compiler.Functions["bind"] = {
-        Name = "bind",
-        Arguments = {"Key", "Command..."},
-        Category = "Core",
+    cmds["bind"] = {
+        Name = "bind", Arguments = {"Key", "Command..."}, Category = "Core",
         Function = function(keyName, ...)
-            if not keyName then
-                logError("Usage: bind <Key> <Command>")
-                return
-            end
+            if not keyName then return logError("Usage: bind <Key> <Command>") end
 
-            local targetKey = nil
+            local targetKey
             for _, keyCode in ipairs(Enum.KeyCode:GetEnumItems()) do
-                if string.lower(keyCode.Name) == string.lower(keyName) then
+                if keyCode.Name:lower() == keyName:lower() then
                     targetKey = keyCode
                     break
                 end
             end
 
-            if not targetKey then
-                logError("Invalid key name: '" .. tostring(keyName) .. "'")
-                return
-            end
+            if not targetKey then return logError("Invalid key name: '" .. tostring(keyName) .. "'") end
 
-            local commandArgs = {...}
-            local boundCommand = table.concat(commandArgs, " ")
-            boundCommand = string.gsub(boundCommand, "^%s*(.-)%s*$", "%1")
-
+            local boundCommand = table.concat({...}, " "):match("^%s*(.-)%s*$")
             if boundCommand == "" or _G.ShellKeybinds[targetKey.Name] == boundCommand then
                 _G.ShellKeybinds[targetKey.Name] = nil
                 log("Unbound key [" .. targetKey.Name .. "]")
@@ -561,67 +343,43 @@ function compiler.Refresh()
         end
     }
 
-    compiler.Functions["binds"] = {
-        Name = "binds",
-        Arguments = {},
-        Category = "Core",
+    cmds["binds"] = {
+        Name = "binds", Arguments = {}, Category = "Core",
         Function = function()
             log("--- Active Keybinds ---")
-            for key, cmd in pairs(_G.ShellKeybinds) do
-                log("[" .. key .. "] -> '" .. cmd .. "'")
-            end
+            for key, cmd in pairs(_G.ShellKeybinds) do log("[" .. key .. "] -> '" .. cmd .. "'") end
             log("-----------------------")
         end
     }
-    
-    -- Sync functions to global space
+
     _G.ShellFunctions = compiler.Functions
-    
-    if _G.ShellUIUpdate then
-        pcall(function()
-            _G.ShellUIUpdate(compiler.Functions)
-        end)
-    end
+    if _G.ShellUIUpdate then pcall(_G.ShellUIUpdate, compiler.Functions) end
     log("Environment compiled successfully.")
 end
 
--- =========================================================
--- INITIALIZATION SEQUENCE
--- =========================================================
-
--- 1. Register functions and publish to global memory
+loadShellAssets()
 compiler.Refresh()
 
--- 2. Load UI layer FIRST (so UI globals like _G.SelectTheme exist)
 local uiCode = fetchRemote(uiPath)
 if uiCode then
-    local success, err = pcall(function()
-        loadstring(uiCode)()
-    end)
-    if not success then
-        logError("Failed to load ui.lua: " .. tostring(err))
-    end
+    local ok, err = pcall(loadstring(uiCode))
+    if not ok then logError("Failed to load ui.lua: " .. tostring(err)) end
 else
     logError("ui.lua could not be fetched from GitHub")
 end
 
--- Push commands to UI after it is initialized
-if _G.ShellUIUpdate then
-    _G.ShellUIUpdate(compiler.Functions)
-end
+if _G.ShellUIUpdate then _G.ShellUIUpdate(compiler.Functions) end
 
--- 3. Process autoexec queue AFTER UI is ready
-local autoexecLines = getAutoexecLines()
+local autoexecLines = getLines("Shell/Core/autoexec.csv")
 if #autoexecLines > 0 then
     log("Running autoexec routine...")
     for _, line in ipairs(autoexecLines) do
         local cmdName, args = parseCommandString(line)
         local cmdData = compiler.Functions[cmdName]
-        
         if cmdData and type(cmdData.Function) == "function" then
             task.spawn(function()
-                local success, err = pcall(cmdData.Function, unpack(args))
-                if success then
+                local ok, err = pcall(cmdData.Function, unpack(args))
+                if ok then
                     log("Autoexec ran successfully: " .. line)
                 else
                     logError("Autoexec failed for '" .. line .. "': " .. tostring(err))
