@@ -103,7 +103,7 @@ Functions["autorejoin"] = {
         GuiService.ErrorMessageChanged:Connect(onErrorMessageChanged)
         if chatDetect then
             local function onChatted(message)
-                if string.find(string.lower(message), "hack") or string.find(string.lower(message), "exploit") then
+                if string.find(string.lower(message), "hack") or string.find(string.lower(message), "exploit") or string.find(string.lower(message), "cheat") or string.find(string.lower(message), player.Name) then
                     logFunc("Rejoin trigger detected in chat.","default")
                     task.wait()
                     rejoin()
