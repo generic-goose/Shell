@@ -4,6 +4,7 @@ local CoreGui = game:GetService("CoreGui")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local Stats = game:GetService("Stats")
+local HttpService = game:GetService("HttpService")
 local LocalizationService = game:GetService("LocalizationService")
 local MarketplaceService = game:GetService("MarketplaceService")
 
@@ -131,6 +132,38 @@ local function createUIElement(className, properties)
 		inst[k] = v
 	end
 	return inst
+end
+
+-- Async Fetcher for GitHub Commits
+local commitCache = {}
+local function fetchLatestCommit(filePath)
+	if commitCache[filePath] then return commitCache[filePath] end
+	
+	local url = string.format("https://api.github.com/repos/generic-goose/Shell/commits?path=%s&page=1&per_page=1", filePath)
+	local requestFunc = (syn and syn.request) or (http and http.request) or request or http_request
+	
+	local dateStr, msgStr = "Error", "Fetch Failed"
+
+	if requestFunc then
+		local ok, response = pcall(requestFunc, { Url = url, Method = "GET" })
+		if ok and response and response.Body then
+			local parseOk, data = pcall(function() return HttpService:JSONDecode(response.Body) end)
+			if parseOk and type(data) == "table" and data[1] and data[1].commit then
+				local commit = data[1].commit
+				local rawDate = commit.committer and commit.committer.date or commit.author.date or ""
+				dateStr = rawDate:match("^(%d%d%d%d%-%d%d%-%d%d)") or "Unknown"
+				
+				local fullMsg = commit.message or "No Message"
+				msgStr = fullMsg:split("\n")[1] -- First line of commit msg
+				if #msgStr > 25 then msgStr = msgStr:sub(1, 22) .. "..." end
+			end
+		end
+	else
+		dateStr, msgStr = "N/A", "HttpReq Unavailable"
+	end
+
+	commitCache[filePath] = { Date = dateStr, Message = msgStr }
+	return commitCache[filePath]
 end
 
 -- =========================================================
@@ -355,6 +388,23 @@ local shellDevLabel = createStatLabel("Dev: --", statsFrame)
 local shellThemeLabel = createStatLabel("Theme: --", statsFrame)
 local shellFuncsLabel = createStatLabel("Functions: --", statsFrame)
 local shellBindsLabel = createStatLabel("Keybinds: --", statsFrame)
+
+-- Newly Added Commit Info Labels
+local compilerCommitLabel = createStatLabel("Compiler: Loading...", statsFrame)
+local uiCommitLabel = createStatLabel("UI: Loading...", statsFrame)
+local funcCommitLabel = createStatLabel("Functions: Loading...", statsFrame)
+
+-- Async load commit details
+task.spawn(function()
+	local compilerData = fetchLatestCommit("Core/compiler.lua")
+	compilerCommitLabel.Text = string.format("Compiler: %s (%s)", compilerData.Date, compilerData.Message)
+
+	local uiData = fetchLatestCommit("Core/ui.lua")
+	uiCommitLabel.Text = string.format("UI: %s (%s)", uiData.Date, uiData.Message)
+
+	local funcData = fetchLatestCommit("Core/functions.lua")
+	funcCommitLabel.Text = string.format("FuncMgr: %s (%s)", funcData.Date, funcData.Message)
+end)
 
 -- Stat Updater Loop
 task.spawn(function()
