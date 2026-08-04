@@ -27,25 +27,6 @@ local function logFunc(msg, logType)
     end
 end
 
-local GuiService = game:GetService("GuiService")
-local Players = game:GetService("Players")
-local TeleportService = game:GetService("TeleportService")
-
-local player = LocalPlayer
-
-local function onErrorMessageChanged(errorMessage)
-    if errorMessage and errorMessage ~= "" then
-        print("Error detected: " .. errorMessage)
-
-        if player then
-            wait()
-            TeleportService:Teleport(game.PlaceId, player)
-        end
-    end
-end
-
-GuiService.ErrorMessageChanged:Connect(onErrorMessageChanged)
-
 --------------------------------------------------------------------------------
 -- Server Utility Commands
 --------------------------------------------------------------------------------
@@ -87,6 +68,55 @@ Functions["discord"] = {
     Category = "Shell",
     Function = function()
         logFunc("https://discord.gg/jBW96MNauQ", "default")
+    end
+}
+
+local autoRejoin = false
+Functions["autorejoin"] = {
+    Name = "autorejoin",
+    Arguments = {"Rejoin on 'exploit' or 'hack' detection. (T/F)"},
+    Category = "Shell",
+    Function = function(chatDetect)
+        autoRejoin = not autoRejoin
+        logFunc("Auto rejoin toggled.", "default")
+    
+        local GuiService = game:GetService("GuiService")
+        local Players = game:GetService("Players")
+        local TeleportService = game:GetService("TeleportService")
+        
+        local player = LocalPlayer or Players.LocalPlayer
+    
+        local function rejoin()
+            if player then
+                TeleportService:Teleport(game.PlaceId, player)
+            end
+        end
+        local function onErrorMessageChanged(errorMessage)
+            if autoRejoin then
+                if errorMessage and errorMessage ~= "" then
+                    print("Error detected: " .. errorMessage)
+                    task.wait()
+                    rejoin()
+                end
+            end
+        end
+        GuiService.ErrorMessageChanged:Connect(onErrorMessageChanged)
+        if chatDetect then
+            local function onChatted(message)
+                if string.find(string.lower(message), "hack") or string.find(string.lower(message), "exploit") then
+                    print("Rejoin trigger detected in chat.")
+                    rejoin()
+                end
+            end
+    
+            local function hookPlayer(targetPlayer)
+                targetPlayer.Chatted:Connect(onChatted)
+            end
+            for _, p in ipairs(Players:GetPlayers()) do
+                hookPlayer(p)
+            end
+            Players.PlayerAdded:Connect(hookPlayer)
+        end
     end
 }
 
