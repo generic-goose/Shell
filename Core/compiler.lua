@@ -394,19 +394,25 @@ if #autoexecLines > 0 then
     log("Running autoexec routine...")
     for _, line in ipairs(autoexecLines) do
         local cmdName, args = parseCommandString(line)
-        local cmdData = compiler.Functions[cmdName]
-        if cmdData and type(cmdData.Function) == "function" then
-            task.spawn(function()
-                local ok, err = pcall(cmdData.Function, unpack(args))
-                if ok then
-                    log("Autoexec ran successfully: " .. line)
-                else
-                    logError("Autoexec failed for '" .. line .. "': " .. tostring(err))
+        task.spawn(function()
+            local timeout = 10
+            local startTime = os.clock()
+            local cmdData = compiler.Functions[cmdName]
+            while not (cmdData and type(cmdData.Function) == "function") do
+                if os.clock() - startTime >= timeout then
+                    logWarn("Autoexec timed out (10s): '" .. tostring(cmdName) .. "' was not registered in time.")
+                    return
                 end
-            end)
-        else
-            logWarn("Autoexec skipped: '" .. tostring(cmdName) .. "' is not a registered command.")
-        end
+                task.wait(0.1)
+                cmdData = compiler.Functions[cmdName]
+            end
+            local ok, err = pcall(cmdData.Function, unpack(args))
+            if ok then
+                log("Autoexec ran successfully: " .. line)
+            else
+                logError("Autoexec failed for '" .. line .. "': " .. tostring(err))
+            end
+        end)
     end
 end
 
