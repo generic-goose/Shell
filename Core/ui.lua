@@ -836,7 +836,7 @@ end
 
 local function saveLog(fullLine)
     if writefile then
-        local lines = getAutoexecLines()
+        local lines = getLog()
         local foundIndex = nil
         table.insert(lines, fullLine)
         writefile("Shell/Core/log.txt", table.concat(lines, "\n"))
