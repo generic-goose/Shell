@@ -818,16 +818,18 @@ end
 
 setupEdgeResizing(mainFrame, Vector2.new(350, 200))
 
+local LOG_PATH = "Shell/Core/log.txt"
+
 local function getLog()
-    if not isfile or not isfile("Shell/Core/log.txt") then 
+    if not isfile or not isfile(LOG_PATH) then 
         return {} 
     end
     
-    local content = readfile("Shell/Core/log.txt")
+    local content = readfile(LOG_PATH)
     local lines = {}
     for line in string.gmatch(content, "[^\r\n]+") do
-        local cleanLine = string.gsub(line, "^%s*(.-)%s*$", "%1")
-        if cleanLine ~= "" then
+        local cleanLine = line:match("^%s*(.-)%s*$")
+        if cleanLine and cleanLine ~= "" then
             table.insert(lines, cleanLine)
         end
     end
@@ -835,17 +837,22 @@ local function getLog()
 end
 
 local function saveLog(fullLine)
-    if writefile then
+    if not fullLine or fullLine == "" then return end
+    if appendfile then
+        if not isfile(LOG_PATH) then
+            writefile(LOG_PATH, "-- Start of Log --\n")
+        end
+        appendfile(LOG_PATH, fullLine .. "\n")
+    elseif writefile then
         local lines = getLog()
-        local foundIndex = nil
         table.insert(lines, fullLine)
-        writefile("Shell/Core/log.txt", table.concat(lines, "\n"))
+        writefile(LOG_PATH, table.concat(lines, "\n"))
     end
 end
 
 local function clearLog()
     if writefile then
-        writefile("Shell/Core/log.txt", "-- Start of Log --")
+        writefile(LOG_PATH, "-- Start of Log --\n")
     end
 end
 
@@ -853,11 +860,7 @@ local function sanitizeLine(line)
     if type(line) ~= "string" then
         return ""
     end
-
-    -- 1. Remove non-printable/control characters (ASCII 0-31 and 127)
     local clean = line:gsub("[%c]", "")
-
-    -- 2. Trim leading and trailing whitespace
     clean = clean:match("^%s*(.-)%s*$")
 
     return clean
