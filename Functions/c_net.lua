@@ -105,6 +105,7 @@ Functions["autorejoin"] = {
             local function onChatted(message)
                 if string.find(string.lower(message), "hack") or string.find(string.lower(message), "exploit") then
                     print("Rejoin trigger detected in chat.")
+                    task.wait()
                     rejoin()
                 end
             end
