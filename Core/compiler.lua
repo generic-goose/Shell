@@ -616,12 +616,14 @@ if #autoexecLines > 0 then
         local cmdData = compiler.Functions[cmdName]
         
         if cmdData and type(cmdData.Function) == "function" then
-            local success, err = pcall(cmdData.Function, unpack(args))
-            if success then
-                log("Autoexec ran successfully: " .. line)
-            else
-                logError("Autoexec failed for '" .. line .. "': " .. tostring(err))
-            end
+            task.spawn(function()
+                local success, err = pcall(cmdData.Function, unpack(args))
+                if success then
+                    log("Autoexec ran successfully: " .. line)
+                else
+                    logError("Autoexec failed for '" .. line .. "': " .. tostring(err))
+                end
+            end)
         else
             logWarn("Autoexec skipped: '" .. tostring(cmdName) .. "' is not a registered command.")
         end
