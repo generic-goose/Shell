@@ -94,7 +94,7 @@ Functions["autorejoin"] = {
         local function onErrorMessageChanged(errorMessage)
             if autoRejoin then
                 if errorMessage and errorMessage ~= "" then
-                    print("Error detected: " .. errorMessage)
+                    logFunc("Error detected: " .. errorMessage,"default")
                     task.wait()
                     rejoin()
                 end
@@ -104,7 +104,7 @@ Functions["autorejoin"] = {
         if chatDetect then
             local function onChatted(message)
                 if string.find(string.lower(message), "hack") or string.find(string.lower(message), "exploit") then
-                    print("Rejoin trigger detected in chat.")
+                    logFunc("Rejoin trigger detected in chat.","default")
                     task.wait()
                     rejoin()
                 end
