@@ -238,7 +238,7 @@ function compiler.Refresh()
     local cmds = compiler.Functions
 
     cmds["download"] = {
-        Name = "download", Arguments = {}, Category = "Core",
+        Name = "download", Arguments = {}, Category = "Core", Desc = "Downloads the latest Shell Core files locally to your device for faster loading or for modified core versions. Please note locally saved files will take priority over new updates pushed to the GitHub, you will need to redownload the Core files each time an update is pushed.",
         Function = function()
             downloadRepositoryFiles()
             showCoreNotification("Shell", "Latest GitHub updates downloaded!", 5)
@@ -246,7 +246,7 @@ function compiler.Refresh()
     }
 
     cmds["exit"] = {
-        Name = "exit", Arguments = {}, Category = "Core",
+        Name = "exit", Arguments = {}, Category = "Core", Desc = "Exits the Shell script, closing any supporting loops, UIs, or systems. Note that in order for a loop to be closed when shell is exited, the loop must check Shell globals.",
         Function = function()
             _G.ShellRunning = false
             if _G.ShellUI then
@@ -258,7 +258,7 @@ function compiler.Refresh()
     }
 
     cmds["gamegen"] = {
-        Name = "gamegen", Arguments = {}, Category = "Core",
+        Name = "gamegen", Arguments = {}, Category = "Core", Desc = "Generates a new script locally for the game you're playing, in 'Shell/Games/[GAME ID].lua'",
         Function = function()
             print("Generating script for game " .. tostring(game.PlaceId))
             local data = fetchRemote(BASE_URL .. "Assets/template.lua")
@@ -273,7 +273,7 @@ function compiler.Refresh()
     }
 
     cmds["_shelldev"] = {
-        Name = "_shelldev", Arguments = {}, Category = "Hidden",
+        Name = "_shelldev", Arguments = {}, Category = "Hidden", Desc = "Turns on Shell Developer mode, displaying debugging logs and statistics for easier scripting."
         Function = function()
             _G.ShellDev = not _G.ShellDev
             logDev((_G.ShellDev and "Enabled" or "Disabled") .. " Shell Developer Mode")
@@ -283,7 +283,7 @@ function compiler.Refresh()
     }
 
     cmds["relaunch"] = {
-        Name = "relaunch", Arguments = {}, Category = "Core",
+        Name = "relaunch", Arguments = {}, Category = "Core", Desc = "Relaunches Shell, reloading all files, systems, functions, and loops.",
         Function = function()
             cmds["exit"].Function()
             showCoreNotification("Shell", "Relaunching shell...", 5)
@@ -294,7 +294,7 @@ function compiler.Refresh()
     }
 
     cmds["clear"] = {
-        Name = "clear", Arguments = {}, Category = "Core",
+        Name = "clear", Arguments = {}, Category = "Core", Desc = "Clears the console, as well as the local log.txt file."
         Function = function()
             if writefile then writefile("Shell/Core/log.txt", "-- Start of Log --") end
             if _G.ShellClearConsole then
@@ -306,7 +306,7 @@ function compiler.Refresh()
     }
 
 cmds["help"] = {
-    Name = "help", Arguments = {"Category or Command (Optional)"}, Category = "Core",
+    Name = "help", Arguments = {"Category or Command (Optional)"}, Category = "Core", Desc = "Displays helpful information on commands and categories."
     Function = function(query)
         log("=================== [ SHELL COMMANDS ] ===================")
         
