@@ -325,31 +325,65 @@ function compiler.Refresh()
     }
 
     cmds["help"] = {
-        Name = "help", Arguments = {}, Category = "Core",
-        Function = function()
-            log("--- Command List ---")
-            local categorized = {}
-            for _, cmd in pairs(cmds) do
-                if cmd.Category ~= "Hidden" then
-                    local cat = cmd.Category or "Uncategorized"
-                    categorized[cat] = categorized[cat] or {}
-                    table.insert(categorized[cat], cmd.Name)
+            Name = "help", Arguments = {"Category (Optional)"}, Category = "Core",
+            Function = function(targetCategory)
+                log("=============== [ SHELL COMMANDS ] ===============")
+                
+                -- Group non-hidden commands by Category
+                local categories = {}
+                for _, cmd in pairs(cmds) do
+                    if cmd.Category ~= "Hidden" then
+                        local cat = cmd.Category or "Uncategorized"
+                        categories[cat] = categories[cat] or {}
+                        table.insert(categories[cat], cmd)
+                    end
                 end
+    
+                -- Filter by specified category if provided
+                if targetCategory and targetCategory ~= "" then
+                    local filtered = {}
+                    for catName, cmdList in pairs(categories) do
+                        if catName:lower() == targetCategory:lower() then
+                            filtered[catName] = cmdList
+                        end
+                    end
+                    
+                    if next(filtered) == nil then
+                        logError("Category '" .. targetCategory .. "' not found.")
+                        log("==================================================")
+                        return
+                    end
+                    categories = filtered
+                end
+    
+                -- Sort categories alphabetically
+                local sortedCatNames = {}
+                for catName in pairs(categories) do table.insert(sortedCatNames, catName) end
+                table.sort(sortedCatNames)
+    
+                -- Format and display categories and commands
+                for _, catName in ipairs(sortedCatNames) do
+                    local cmdList = categories[catName]
+                    table.sort(cmdList, function(a, b) return a.Name < b.Name end)
+    
+                    log("\n" .. catName:upper() .. " (" .. #cmdList .. ")")
+                    log(string.rep("-", 45))
+    
+                    for _, cmd in ipairs(cmdList) do
+                        local argsText = ""
+                        if cmd.Arguments and #cmd.Arguments > 0 then
+                            argsText = " <" .. table.concat(cmd.Arguments, "> <") .. ">"
+                        end
+                        -- Pads the command name to keep argument formatting aligned cleanly
+                        log(string.format("  • %-16s%s", cmd.Name, argsText))
+                    end
+                end
+    
+                log("\n" .. string.rep("=", 50))
+                log("Tip: Use 'help <Category>' to filter. Run 'refresh' if commands are missing.")
+                log("Discord: https://discord.gg/jBW96MNauQ")
             end
-
-            local sortedCategories = {}
-            for cat in pairs(categorized) do table.insert(sortedCategories, cat) end
-            table.sort(sortedCategories)
-
-            for _, cat in ipairs(sortedCategories) do
-                local list = categorized[cat]
-                table.sort(list)
-                log("[" .. cat .. " (" .. #list .. ")]: " .. table.concat(list, ", "))
-            end
-            log("--------------------")
-            log("This list is extensive to all currently loaded commands. If you expected to see a command here, try using the 'refresh' command to refresh the list.\n\nJoin the Shell Discord for more support.\nhttps://discord.gg/jBW96MNauQ")
-        end
-    }
+        }
 
     cmds["refresh"] = { Name = "refresh", Arguments = {}, Category = "Core", Function = compiler.Refresh }
 
