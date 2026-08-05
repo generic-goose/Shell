@@ -294,7 +294,7 @@ function compiler.Refresh()
     }
 
     cmds["clear"] = {
-        Name = "clear", Arguments = {}, Category = "Core", Desc = "Clears the console, as well as the local log.txt file."
+        Name = "clear", Arguments = {}, Category = "Core", Desc = "Clears the console, as well as the local log.txt file.",
         Function = function()
             if writefile then writefile("Shell/Core/log.txt", "-- Start of Log --") end
             if _G.ShellClearConsole then
