@@ -182,7 +182,7 @@ Functions["cobalt"] = {
     Function = function()
         logFunc("Loading Cobalt...", "default")
         local success, err = pcall(function()
-            loadstring(game:HttpGet("https://github.com/notpoiu/cobalt/releases/latest/download/Cobalt.luau"))()
+            loadstring(game:HttpGet("https://raw.githubusercontent.com/generic-goose/Shell/refs/heads/main/Assets/cobalt.lua"))()
         end)
         
         if not success then
