@@ -305,66 +305,84 @@ function compiler.Refresh()
         end
     }
 
-    cmds["help"] = {
-        Name = "help", Arguments = {"Category (Optional)"}, Category = "Core",
-        Function = function(targetCategory)
-            log("=============== [ SHELL COMMANDS ] ===============")
-            
-            -- Group non-hidden commands by Category
-            local categories = {}
-            for _, cmd in pairs(cmds) do
-                if cmd.Category ~= "Hidden" then
-                    local cat = cmd.Category or "Uncategorized"
-                    categories[cat] = categories[cat] or {}
-                    table.insert(categories[cat], cmd)
-                end
-            end
-
-            -- Filter by specified category if provided
-            if targetCategory and targetCategory ~= "" then
-                local filtered = {}
-                for catName, cmdList in pairs(categories) do
-                    if catName:lower() == targetCategory:lower() then
-                        filtered[catName] = cmdList
-                    end
+cmds["help"] = {
+    Name = "help", Arguments = {"Category or Command (Optional)"}, Category = "Core",
+    Function = function(query)
+        log("=================== [ SHELL COMMANDS ] ===================")
+        
+        -- Support direct lookup for a single command
+        if query and query ~= "" then
+            local targetCmd = cmds[query:lower()]
+            if targetCmd and targetCmd.Category ~= "Hidden" then
+                local argsText = ""
+                if targetCmd.Arguments and #targetCmd.Arguments > 0 then
+                    argsText = " <" .. table.concat(targetCmd.Arguments, "> <") .. ">"
                 end
                 
-                if next(filtered) == nil then
-                    logError("Category '" .. targetCategory .. "' not found.")
-                    log("==================================================")
-                    return
-                end
-                categories = filtered
+                -- Resolve description from either Description or Desc key
+                local description = targetCmd.Description or targetCmd.Desc or "No description provided."
+
+                log("\nCommand: " .. targetCmd.Name .. argsText)
+                log("Category: " .. (targetCmd.Category or "Uncategorized"))
+                log("Description: " .. description)
+                log("==========================================================")
+                return
             end
-
-            -- Sort categories alphabetically
-            local sortedCatNames = {}
-            for catName in pairs(categories) do table.insert(sortedCatNames, catName) end
-            table.sort(sortedCatNames)
-
-            -- Format and display categories and commands
-            for _, catName in ipairs(sortedCatNames) do
-                local cmdList = categories[catName]
-                table.sort(cmdList, function(a, b) return a.Name < b.Name end)
-
-                log("\n" .. catName:upper() .. " (" .. #cmdList .. ")")
-                log(string.rep("-", 45))
-
-                for _, cmd in ipairs(cmdList) do
-                    local argsText = ""
-                    if cmd.Arguments and #cmd.Arguments > 0 then
-                        argsText = " <" .. table.concat(cmd.Arguments, "> <") .. ">"
-                    end
-                    -- Pads the command name to keep argument formatting aligned cleanly
-                    log(string.format("  • %-16s%s", cmd.Name, argsText))
-                end
-            end
-
-            log("\n" .. string.rep("=", 50))
-            log("Tip: Use 'help <Category>' to filter. Run 'refresh' if commands are missing.")
-            log("Discord: https://discord.gg/jBW96MNauQ")
         end
-    }
+
+        -- Group non-hidden commands by Category
+        local categories = {}
+        for _, cmd in pairs(cmds) do
+            if cmd.Category ~= "Hidden" then
+                local cat = cmd.Category or "Uncategorized"
+                categories[cat] = categories[cat] or {}
+                table.insert(categories[cat], cmd)
+            end
+        end
+
+        -- Filter by specified category if provided
+        if query and query ~= "" then
+            local filtered = {}
+            for catName, cmdList in pairs(categories) do
+                if catName:lower() == query:lower() then
+                    filtered[catName] = cmdList
+                end
+            end
+            
+            if next(filtered) == nil then
+                logError("No command or category matching '" .. query .. "' found.")
+                log("==========================================================")
+                return
+            end
+            categories = filtered
+        end
+
+        -- Sort category names
+        local sortedCatNames = {}
+        for catName in pairs(categories) do table.insert(sortedCatNames, catName) end
+        table.sort(sortedCatNames)
+
+        -- Compact Display: Print category headers and inline command list
+        for _, catName in ipairs(sortedCatNames) do
+            local cmdList = categories[catName]
+            table.sort(cmdList, function(a, b) return a.Name < b.Name end)
+
+            log("\n[" .. catName:upper() .. "] (" .. #cmdList .. ")")
+            
+            for _, cmd in ipairs(cmdList) do
+                local argsText = ""
+                if cmd.Arguments and #cmd.Arguments > 0 then
+                    argsText = " <" .. table.concat(cmd.Arguments, "> <") .. ">"
+                end
+                log(string.format("  • %s%s", cmd.Name, argsText))
+            end
+        end
+
+        log("\n==========================================================")
+        log("Tip: Use 'help <Category/Command>' to search.")
+        log("Discord: https://discord.gg/jBW96MNauQ")
+    end
+}
 
     cmds["refresh"] = { Name = "refresh", Arguments = {}, Category = "Core", Function = compiler.Refresh }
 
