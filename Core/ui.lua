@@ -139,6 +139,12 @@ local commitCache = {}
 local function fetchLatestCommit(filePath)
 	if commitCache[filePath] then return commitCache[filePath] end
 	
+	-- Check if the file exists locally on the user's PC
+	if isfile and isfile(filePath) then
+		commitCache[filePath] = { Date = "N/A (Local)", Message = "N/A (Local)" }
+		return commitCache[filePath]
+	end
+
 	local url = string.format("https://api.github.com/repos/generic-goose/Shell/commits?path=%s&page=1&per_page=1", filePath)
 	local requestFunc = (syn and syn.request) or (http and http.request) or request or http_request
 	
