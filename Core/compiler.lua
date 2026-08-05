@@ -273,7 +273,7 @@ function compiler.Refresh()
     }
 
     cmds["_shelldev"] = {
-        Name = "_shelldev", Arguments = {}, Category = "Hidden", Desc = "Turns on Shell Developer mode, displaying debugging logs and statistics for easier scripting."
+        Name = "_shelldev", Arguments = {}, Category = "Hidden", Desc = "Turns on Shell Developer mode, displaying debugging logs and statistics for easier scripting.",
         Function = function()
             _G.ShellDev = not _G.ShellDev
             logDev((_G.ShellDev and "Enabled" or "Disabled") .. " Shell Developer Mode")
@@ -306,7 +306,7 @@ function compiler.Refresh()
     }
 
 cmds["help"] = {
-    Name = "help", Arguments = {"Category or Command (Optional)"}, Category = "Core", Desc = "Displays helpful information on commands and categories."
+    Name = "help", Arguments = {"Category or Command (Optional)"}, Category = "Core", Desc = "Displays helpful information on commands and categories.",
     Function = function(query)
         log("=================== [ SHELL COMMANDS ] ===================")
         
