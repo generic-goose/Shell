@@ -96,11 +96,10 @@ local function loadCoreModule(localPath, remoteUrl, chunkName)
 
         return safeLoadString(localContent, chunkName)
     else
-        -- Fallback: If no local file exists, fetch from remote directly
-        log("Local module missing. Fetching remote: " .. remoteUrl)
+        -- Fallback: If no local file exists, fetch from remote directly without saving to disk
+        log("Local module missing. Fetching remote in-memory: " .. remoteUrl)
         local remoteContent = fetchRemote(remoteUrl)
         if remoteContent then
-            if writefile then pcall(writefile, localPath, remoteContent) end
             return safeLoadString(remoteContent, chunkName)
         else
             return false, "Failed to load code locally or from GitHub."
@@ -157,22 +156,6 @@ local function downloadRepositoryFiles()
 end
 
 local function loadShellAssets()
-    local ready = checkFolder("Shell")
-        and checkFolder("Shell/Assets")
-        and checkFolder("Shell/Core")
-        and checkFolder("Shell/Functions")
-        and checkFolder("Shell/Games")
-        and checkFolder("Shell/Assets/Themes")
-        and checkFile("Shell/Assets/Themes/default.csv")
-        and checkFile("Shell/Assets/Themes/shell.csv")
-        and checkFile("Shell/Core/imported.csv")
-        and checkFile("Shell/Core/autoexec.csv")
-        and checkFile("Shell/Assets/example.lua")
-
-    if ready then return end
-
-    print("[Shell Setup]: Initializing missing workspace structure and assets...")
-
     for _, path in ipairs({
         "Shell", "Shell/Core", "Shell/Assets", 
         "Shell/Assets/Themes", "Shell/Games", "Shell/Functions"
@@ -189,8 +172,6 @@ local function loadShellAssets()
             writefile("Shell/Core/autoexec.csv", "")
         end
     end
-
-    downloadRepositoryFiles()
 end
 
 local function getLines(path)
@@ -325,65 +306,65 @@ function compiler.Refresh()
     }
 
     cmds["help"] = {
-            Name = "help", Arguments = {"Category (Optional)"}, Category = "Core",
-            Function = function(targetCategory)
-                log("=============== [ SHELL COMMANDS ] ===============")
-                
-                -- Group non-hidden commands by Category
-                local categories = {}
-                for _, cmd in pairs(cmds) do
-                    if cmd.Category ~= "Hidden" then
-                        local cat = cmd.Category or "Uncategorized"
-                        categories[cat] = categories[cat] or {}
-                        table.insert(categories[cat], cmd)
-                    end
+        Name = "help", Arguments = {"Category (Optional)"}, Category = "Core",
+        Function = function(targetCategory)
+            log("=============== [ SHELL COMMANDS ] ===============")
+            
+            -- Group non-hidden commands by Category
+            local categories = {}
+            for _, cmd in pairs(cmds) do
+                if cmd.Category ~= "Hidden" then
+                    local cat = cmd.Category or "Uncategorized"
+                    categories[cat] = categories[cat] or {}
+                    table.insert(categories[cat], cmd)
                 end
-    
-                -- Filter by specified category if provided
-                if targetCategory and targetCategory ~= "" then
-                    local filtered = {}
-                    for catName, cmdList in pairs(categories) do
-                        if catName:lower() == targetCategory:lower() then
-                            filtered[catName] = cmdList
-                        end
-                    end
-                    
-                    if next(filtered) == nil then
-                        logError("Category '" .. targetCategory .. "' not found.")
-                        log("==================================================")
-                        return
-                    end
-                    categories = filtered
-                end
-    
-                -- Sort categories alphabetically
-                local sortedCatNames = {}
-                for catName in pairs(categories) do table.insert(sortedCatNames, catName) end
-                table.sort(sortedCatNames)
-    
-                -- Format and display categories and commands
-                for _, catName in ipairs(sortedCatNames) do
-                    local cmdList = categories[catName]
-                    table.sort(cmdList, function(a, b) return a.Name < b.Name end)
-    
-                    log("\n" .. catName:upper() .. " (" .. #cmdList .. ")")
-                    log(string.rep("-", 45))
-    
-                    for _, cmd in ipairs(cmdList) do
-                        local argsText = ""
-                        if cmd.Arguments and #cmd.Arguments > 0 then
-                            argsText = " <" .. table.concat(cmd.Arguments, "> <") .. ">"
-                        end
-                        -- Pads the command name to keep argument formatting aligned cleanly
-                        log(string.format("  • %-16s%s", cmd.Name, argsText))
-                    end
-                end
-    
-                log("\n" .. string.rep("=", 50))
-                log("Tip: Use 'help <Category>' to filter. Run 'refresh' if commands are missing.")
-                log("Discord: https://discord.gg/jBW96MNauQ")
             end
-        }
+
+            -- Filter by specified category if provided
+            if targetCategory and targetCategory ~= "" then
+                local filtered = {}
+                for catName, cmdList in pairs(categories) do
+                    if catName:lower() == targetCategory:lower() then
+                        filtered[catName] = cmdList
+                    end
+                end
+                
+                if next(filtered) == nil then
+                    logError("Category '" .. targetCategory .. "' not found.")
+                    log("==================================================")
+                    return
+                end
+                categories = filtered
+            end
+
+            -- Sort categories alphabetically
+            local sortedCatNames = {}
+            for catName in pairs(categories) do table.insert(sortedCatNames, catName) end
+            table.sort(sortedCatNames)
+
+            -- Format and display categories and commands
+            for _, catName in ipairs(sortedCatNames) do
+                local cmdList = categories[catName]
+                table.sort(cmdList, function(a, b) return a.Name < b.Name end)
+
+                log("\n" .. catName:upper() .. " (" .. #cmdList .. ")")
+                log(string.rep("-", 45))
+
+                for _, cmd in ipairs(cmdList) do
+                    local argsText = ""
+                    if cmd.Arguments and #cmd.Arguments > 0 then
+                        argsText = " <" .. table.concat(cmd.Arguments, "> <") .. ">"
+                    end
+                    -- Pads the command name to keep argument formatting aligned cleanly
+                    log(string.format("  • %-16s%s", cmd.Name, argsText))
+                end
+            end
+
+            log("\n" .. string.rep("=", 50))
+            log("Tip: Use 'help <Category>' to filter. Run 'refresh' if commands are missing.")
+            log("Discord: https://discord.gg/jBW96MNauQ")
+        end
+    }
 
     cmds["refresh"] = { Name = "refresh", Arguments = {}, Category = "Core", Function = compiler.Refresh }
 
