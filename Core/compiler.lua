@@ -322,7 +322,7 @@ cmds["help"] = {
                 -- Resolve description from either Description or Desc key
                 local description = targetCmd.Description or targetCmd.Desc or "No description provided."
 
-                log("\nCommand: " .. targetCmd.Name .. argsText)
+                log("Command: " .. targetCmd.Name .. argsText)
                 log("Category: " .. (targetCmd.Category or "Uncategorized"))
                 log("Description: " .. description)
                 log("==========================================================")
@@ -367,7 +367,7 @@ cmds["help"] = {
             local cmdList = categories[catName]
             table.sort(cmdList, function(a, b) return a.Name < b.Name end)
 
-            log("\n[" .. catName:upper() .. "] (" .. #cmdList .. ")")
+            log("[" .. catName:upper() .. "] (" .. #cmdList .. ")")
             
             for _, cmd in ipairs(cmdList) do
                 local argsText = ""
@@ -378,7 +378,7 @@ cmds["help"] = {
             end
         end
 
-        log("\n==========================================================")
+        log("==========================================================")
         log("Tip: Use 'help <Category/Command>' to search.")
         log("Discord: https://discord.gg/jBW96MNauQ")
     end
