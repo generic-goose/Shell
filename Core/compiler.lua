@@ -21,6 +21,15 @@ local function fetchRemote(url)
     return ok and res or nil
 end
 
+local function checkFile(path) return isfile and isfile(path) end
+local function checkFolder(path) return isfolder and isfolder(path) end
+
+local function ensureFolder(path)
+    if makefolder and isfolder and not isfolder(path) then
+        pcall(makefolder, path)
+    end
+end
+
 local function safeLoadString(code, chunkName)
     local fn, err = loadstring(code, chunkName)
     if not fn then
@@ -64,14 +73,88 @@ local function parseCommandString(str)
     return table.remove(args, 1), args
 end
 
-local function ensureFolder(path)
-    if makefolder and isfolder and not isfolder(path) then
-        pcall(makefolder, path)
+-- Non-blocking core module loader
+local function loadCoreModule(localPath, remoteUrl, chunkName)
+    local localExists = checkFile(localPath)
+    local localContent = localExists and readfile(localPath) or nil
+
+    if localContent then
+        log("Loading local module: " .. localPath)
+
+        -- Defer the web check to a background thread so execution is not blocked
+        task.spawn(function()
+            local remoteContent = fetchRemote(remoteUrl)
+            if remoteContent then
+                local localHash = hash and hash(localContent, "md5") or nil
+                local remoteHash = hash and hash(remoteContent, "md5") or nil
+                
+                if (localHash and remoteHash and localHash ~= remoteHash) or (localContent ~= remoteContent) then
+                    logWarn("Version mismatch detected for " .. chunkName .. "! Local file differs from latest GitHub version. Run 'download' to update.")
+                end
+            end
+        end)
+
+        return safeLoadString(localContent, chunkName)
+    else
+        -- Fallback: If no local file exists, fetch from remote directly
+        log("Local module missing. Fetching remote: " .. remoteUrl)
+        local remoteContent = fetchRemote(remoteUrl)
+        if remoteContent then
+            if writefile then pcall(writefile, localPath, remoteContent) end
+            return safeLoadString(remoteContent, chunkName)
+        else
+            return false, "Failed to load code locally or from GitHub."
+        end
     end
 end
 
-local function checkFolder(path) return isfolder and isfolder(path) end
-local function checkFile(path) return isfile and isfile(path) end
+local function downloadRepositoryFiles()
+    log("Downloading latest files from GitHub...")
+    
+    local coreFiles = {
+        ["Core/compiler.lua"] = "Shell/Core/compiler.lua",
+        ["Core/functions.lua"] = "Shell/Core/functions.lua",
+        ["Core/ui.lua"] = "Shell/Core/ui.lua"
+    }
+
+    for remoteSubPath, localSubPath in pairs(coreFiles) do
+        local content = fetchRemote(BASE_URL .. remoteSubPath)
+        if content and writefile then
+            writefile(localSubPath, content)
+            log("Updated core file: " .. localSubPath)
+        else
+            logError("Failed to update: " .. localSubPath)
+        end
+    end
+
+    local function fetchGithubDirectory(repoPath, localPath)
+        local json = fetchRemote("https://api.github.com/repos/generic-goose/Shell/contents/" .. repoPath)
+        if not json then return end
+
+        local ok, items = pcall(function()
+            return HttpService:JSONDecode(json)
+        end)
+
+        if ok and type(items) == "table" then
+            for _, item in ipairs(items) do
+                local targetPath = localPath .. "/" .. item.name
+                if item.type == "file" and item.download_url then
+                    local content = fetchRemote(item.download_url)
+                    if content and writefile then 
+                        writefile(targetPath, content)
+                        log("Downloaded asset: " .. targetPath)
+                    end
+                elseif item.type == "dir" then
+                    ensureFolder(targetPath)
+                    fetchGithubDirectory(repoPath .. "/" .. item.name, targetPath)
+                end
+            end
+        end
+    end
+
+    fetchGithubDirectory("Assets", "Shell/Assets")
+    log("Download complete!")
+end
 
 local function loadShellAssets()
     local ready = checkFolder("Shell")
@@ -107,31 +190,7 @@ local function loadShellAssets()
         end
     end
 
-    local function fetchGithubDirectory(repoPath, localPath)
-        local json = fetchRemote("https://api.github.com/repos/generic-goose/Shell/contents/" .. repoPath)
-        if not json then return end
-
-        local ok, items = pcall(function()
-            return HttpService:JSONDecode(json)
-        end)
-
-        if ok and type(items) == "table" then
-            for _, item in ipairs(items) do
-                local targetPath = localPath .. "/" .. item.name
-                if item.type == "file" and item.download_url then
-                    if not checkFile(targetPath) then
-                        local content = fetchRemote(item.download_url)
-                        if content and writefile then writefile(targetPath, content) end
-                    end
-                elseif item.type == "dir" then
-                    ensureFolder(targetPath)
-                    fetchGithubDirectory(repoPath .. "/" .. item.name, targetPath)
-                end
-            end
-        end
-    end
-
-    fetchGithubDirectory("Assets", "Shell/Assets")
+    downloadRepositoryFiles()
 end
 
 local function getLines(path)
@@ -188,19 +247,22 @@ showCoreNotification("Shell", "Initializing...", 5)
 function compiler.Refresh()
     compiler.Functions = {}
     
-    local funcCode = fetchRemote(funcPath)
-    if funcCode then
-        local ok, funcModule = safeLoadString(funcCode, "functions.lua")
-        if ok and type(funcModule) == "table" then
-            for k, v in pairs(funcModule) do compiler.Functions[k] = v end
-        else
-            logError("Failed to load functions.lua: " .. tostring(funcModule))
-        end
+    local ok, funcModule = loadCoreModule("Shell/Core/functions.lua", funcPath, "functions.lua")
+    if ok and type(funcModule) == "table" then
+        for k, v in pairs(funcModule) do compiler.Functions[k] = v end
     else
-        logError("functions.lua could not be fetched from GitHub")
+        logError("Failed to load functions.lua: " .. tostring(funcModule))
     end
 
     local cmds = compiler.Functions
+
+    cmds["download"] = {
+        Name = "download", Arguments = {}, Category = "Core",
+        Function = function()
+            downloadRepositoryFiles()
+            showCoreNotification("Shell", "Latest GitHub updates downloaded!", 5)
+        end
+    }
 
     cmds["exit"] = {
         Name = "exit", Arguments = {}, Category = "Core",
@@ -245,13 +307,8 @@ function compiler.Refresh()
             cmds["exit"].Function()
             showCoreNotification("Shell", "Relaunching shell...", 5)
             task.wait(0.5)
-            local compilerCode = fetchRemote(compilerPath)
-            if compilerCode then
-                local ok, err = safeLoadString(compilerCode, "compiler.lua")
-                if not ok then warn(err) end
-            else
-                logError("Failed to fetch compiler.lua during relaunch")
-            end
+            local ok, err = loadCoreModule("Shell/Core/compiler.lua", compilerPath, "compiler.lua")
+            if not ok then logError("Failed to load compiler.lua on relaunch: " .. tostring(err)) end
         end
     }
 
@@ -379,13 +436,8 @@ end
 loadShellAssets()
 compiler.Refresh()
 
-local uiCode = fetchRemote(uiPath)
-if uiCode then
-    local ok, err = safeLoadString(uiCode, "ui.lua")
-    if not ok then logError("Failed to load ui.lua: " .. tostring(err)) end
-else
-    logError("ui.lua could not be fetched from GitHub")
-end
+local ok, err = loadCoreModule("Shell/Core/ui.lua", uiPath, "ui.lua")
+if not ok then logError("Failed to load ui.lua: " .. tostring(err)) end
 
 if _G.ShellUIUpdate then _G.ShellUIUpdate(compiler.Functions) end
 
