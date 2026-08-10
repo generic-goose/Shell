@@ -7,6 +7,9 @@ local Stats = game:GetService("Stats")
 local HttpService = game:GetService("HttpService")
 local LocalizationService = game:GetService("LocalizationService")
 local MarketplaceService = game:GetService("MarketplaceService")
+local Lighting = game:GetService("Lighting")
+local TeleportService = game:GetService("TeleportService")
+local VirtualUser = game:GetService("VirtualUser")
 
 local localPlayer = Players.LocalPlayer
 
@@ -19,12 +22,14 @@ local DEFAULT_TEXT_COLOR = Color3.fromRGB(220, 220, 220)
 local DEFAULT_THEME_PATH = "Shell/Assets/Themes/default.csv"
 local SHELL_THEME_PATH = "Shell/Assets/Themes/shell.csv"
 local LOG_PATH = "Shell/Core/log.txt"
+local WAYPOINTS_PATH = "Shell/Core/waypoints.json"
 
 local THEME = {
-	Background = Color3.fromRGB(25, 25, 25),
-	Border = Color3.fromRGB(45, 45, 45),
+	Background = Color3.fromRGB(20, 20, 24),
+	Header = Color3.fromRGB(28, 28, 34),
+	Border = Color3.fromRGB(45, 45, 55),
 	Text = DEFAULT_TEXT_COLOR,
-	Placeholder = Color3.fromRGB(120, 120, 120),
+	Placeholder = Color3.fromRGB(120, 120, 130),
 	Accent = Color3.fromRGB(100, 180, 255),
 	Console_Info = Color3.fromRGB(200, 200, 200),
 	Console_Warn = Color3.fromRGB(255, 180, 50),
@@ -36,8 +41,8 @@ local THEME = {
 	CommandFontSize = 14,
 	SuggestionTextColor = DEFAULT_TEXT_COLOR,
 	SuggestionFontSize = 14,
-	FrameSize = Vector2.new(550, 400),
-	UseUICorner = false,
+	FrameSize = Vector2.new(620, 450),
+	UseUICorner = true,
 	CustomTitle = "",
 	BackgroundImage = "",
 	BackgroundImageTransparency = 0.5,
@@ -46,6 +51,37 @@ local THEME = {
 	TypingSound = "",
 	EnterSound = "",
 }
+
+local SETTINGS = {
+	AutoScroll = true,
+	ShowTimestamps = true,
+	SoundEnabled = true,
+	DevStatsFrequency = 0.25,
+}
+
+local TAB_VISIBILITY_SETTINGS = {
+	Console = true,
+	Scripts = true,
+	Waypoints = true,
+	Settings = true,
+}
+
+local SCRIPT_STATES = {
+	Fullbright = false,
+	InfJump = false,
+	Noclip = false,
+	Fly = false,
+	AntiAFK = false,
+}
+
+local LOG_FILTER_STATE = {
+	SearchText = "",
+	ShowInfo = true,
+	ShowWarn = true,
+	ShowError = true,
+}
+
+local WAYPOINTS = {}
 
 -- =========================================================
 -- Helpers & Builders
@@ -58,10 +94,15 @@ end
 local function parseColor3(val)
 	if typeof(val) == "Color3" then return val end
 	local clean = cleanStr(val)
+	-- Fixed: Properly matches 3 numbers (R, G, B)
 	local r, g, b = clean:match("(%d+)%s*,%s*(%d+)%s*,%s*(%d+)")
-	if r and g and b then return Color3.fromRGB(tonumber(r), tonumber(g), tonumber(b)) end
+	if r and g and b then 
+		return Color3.fromRGB(tonumber(r), tonumber(g), tonumber(b)) 
+	end
 	local cleanHex = clean:gsub("#", "")
-	if #cleanHex == 6 and tonumber(cleanHex, 16) then return Color3.fromHex(cleanHex) end
+	if #cleanHex == 6 and tonumber(cleanHex, 16) then 
+		return Color3.fromHex(cleanHex) 
+	end
 	return nil
 end
 
@@ -73,13 +114,15 @@ local function autoParseValue(key, val)
 	local lower = val:lower()
 	if lower == "true" then return true end
 	if lower == "false" then return false end
-	if tonumber(val) then return tonumber(val) end
-	
+
 	local parsedColor = parseColor3(val)
 	if parsedColor then return parsedColor end
 
+	if tonumber(val) then return tonumber(val) end
+
 	local clean = cleanStr(val)
-	local x, y = clean:match("(%d+)%s*,%s*(%d+)")
+	-- Fixed: Vector2/Dimensions only matched if color parsing failed and it's explicitly 2 numbers
+	local x, y = clean:match("^%s*(%d+)%s*,%s*(%d+)%s*$")
 	if x and y then
 		local vec = Vector2.new(tonumber(x), tonumber(y))
 		return (key:find("TileSize") or key:find("UDim2")) and UDim2.new(0, vec.X, 0, vec.Y) or vec
@@ -94,16 +137,6 @@ local function autoParseValue(key, val)
 	return val
 end
 
-local function formatImageAsset(pathOrId)
-	if not pathOrId or pathOrId == "" then return "" end
-	if isfile and isfile(pathOrId) and getcustomasset then
-		local ok, customAsset = pcall(getcustomasset, pathOrId)
-		if ok then return customAsset end
-	end
-	if pathOrId:find("rbxassetid://") or pathOrId:find("http") then return pathOrId end
-	return tonumber(pathOrId) and ("rbxassetid://" .. pathOrId) or pathOrId
-end
-
 local function applyCorners(parent, radius)
 	if not THEME.UseUICorner then
 		local existing = parent:FindFirstChildOfClass("UICorner")
@@ -111,7 +144,7 @@ local function applyCorners(parent, radius)
 		return nil
 	end
 	local corner = parent:FindFirstChildOfClass("UICorner") or Instance.new("UICorner")
-	corner.CornerRadius = radius or UDim.new(0, 4)
+	corner.CornerRadius = radius or UDim.new(0, 6)
 	corner.Parent = parent
 	return corner
 end
@@ -134,12 +167,30 @@ local function createUIElement(className, properties)
 	return inst
 end
 
--- Async Fetcher for GitHub Commits
+local function createStatLabel(text, parent, isHeader)
+	return createUIElement("TextLabel", {
+		Size = UDim2.new(1, -6, 0, isHeader and 20 or 16),
+		BackgroundTransparency = 1,
+		Font = isHeader and Enum.Font.GothamBold or (THEME.ConsoleFont or Enum.Font.Code),
+		TextSize = isHeader and 12 or 11,
+		TextColor3 = toColor3(isHeader and THEME.Accent or THEME.Text),
+		Text = text,
+		TextXAlignment = isHeader and Enum.TextXAlignment.Center or Enum.TextXAlignment.Left,
+		Parent = parent
+	})
+end
+
+local function createDivider(parent)
+	return createUIElement("Frame", {
+		Size = UDim2.new(1, -6, 0, 1),
+		BackgroundColor3 = toColor3(THEME.Border),
+		BorderSizePixel = 0, Parent = parent
+	})
+end
+
 local commitCache = {}
 local function fetchLatestCommit(filePath)
 	if commitCache[filePath] then return commitCache[filePath] end
-	
-	-- Check if the file exists locally on the user's PC
 	if isfile and isfile(filePath) then
 		commitCache[filePath] = { Date = "N/A (Local)", Message = "N/A (Local)" }
 		return commitCache[filePath]
@@ -147,7 +198,6 @@ local function fetchLatestCommit(filePath)
 
 	local url = string.format("https://api.github.com/repos/generic-goose/Shell/commits?path=%s&page=1&per_page=1", filePath)
 	local requestFunc = (syn and syn.request) or (http and http.request) or request or http_request
-	
 	local dateStr, msgStr = "Error", "Fetch Failed"
 
 	if requestFunc then
@@ -158,9 +208,8 @@ local function fetchLatestCommit(filePath)
 				local commit = data[1].commit
 				local rawDate = commit.committer and commit.committer.date or commit.author.date or ""
 				dateStr = rawDate:match("^(%d%d%d%d%-%d%d%-%d%d)") or "Unknown"
-				
 				local fullMsg = commit.message or "No Message"
-				msgStr = fullMsg:split("\n")[1] -- First line of commit msg
+				msgStr = fullMsg:split("\n")[1]
 				if #msgStr > 25 then msgStr = msgStr:sub(1, 22) .. "..." end
 			end
 		end
@@ -173,7 +222,7 @@ local function fetchLatestCommit(filePath)
 end
 
 -- =========================================================
--- Theme Parsing Logic
+-- Theme & Storage Logic
 -- =========================================================
 local function resetThemeToDefaults()
 	THEME.CustomTitle, THEME.BackgroundImage, THEME.TypingSound, THEME.EnterSound = "", "", "", ""
@@ -205,16 +254,24 @@ pcall(function()
 	loadThemeFromCSV(DEFAULT_THEME_PATH)
 end)
 
-local function getAvailableThemes()
-	local themes, themeDir = {}, "Shell/Assets/Themes"
-	if listfiles and isfolder and isfolder(themeDir) then
-		for _, file in ipairs(listfiles(themeDir)) do
-			local name = file:match("([^/\\]+)%.csv$")
-			if name then table.insert(themes, name) end
+local function loadWaypointsFromFile()
+	if isfile and readfile and isfile(WAYPOINTS_PATH) then
+		local ok, decoded = pcall(function() return HttpService:JSONDecode(readfile(WAYPOINTS_PATH)) end)
+		if ok and type(decoded) == "table" then
+			WAYPOINTS = decoded
+			return
 		end
 	end
-	return themes
+	WAYPOINTS = {}
 end
+
+local function saveWaypointsToFile()
+	if writefile then
+		pcall(function() writefile(WAYPOINTS_PATH, HttpService:JSONEncode(WAYPOINTS)) end)
+	end
+end
+
+loadWaypointsFromFile()
 
 -- =========================================================
 -- UI Hierarchy Construction
@@ -231,7 +288,7 @@ local typingSoundObj = createUIElement("Sound", { Name = "TypingAudio", Volume =
 local enterSoundObj = createUIElement("Sound", { Name = "EnterAudio", Volume = 0.5, Parent = screenGui })
 
 local function playThemeAudio(soundObj, assetId)
-	if assetId and assetId ~= "" then
+	if SETTINGS.SoundEnabled and assetId and assetId ~= "" then
 		local formatted = assetId:match("^rbxassetid://") and assetId or ("rbxassetid://" .. assetId)
 		if soundObj.SoundId ~= formatted then soundObj.SoundId = formatted end
 		soundObj:Play()
@@ -247,33 +304,21 @@ local mainFrame = createUIElement("Frame", {
 })
 applyCorners(mainFrame)
 
-local mainStroke = createUIElement("UIStroke", {
+createUIElement("UIStroke", {
 	Color = toColor3(THEME.Border), Thickness = 1,
 	ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = mainFrame
 })
 
 local titleBar = createUIElement("Frame", {
-	Name = "TitleBar", Size = UDim2.new(1, 0, 0, 30),
-	BackgroundColor3 = toColor3(THEME.Border), BorderSizePixel = 0, Parent = mainFrame
+	Name = "TitleBar", Size = UDim2.new(1, 0, 0, 32),
+	BackgroundColor3 = toColor3(THEME.Header, THEME.Border), BorderSizePixel = 0, Parent = mainFrame
 })
 applyCorners(titleBar)
 
-local titleText = createUIElement("TextLabel", {
-	Name = "TitleText", Size = UDim2.new(1, -220, 1, 0), Position = UDim2.new(0, 10, 0, 0),
+createUIElement("TextLabel", {
+	Name = "TitleText", Size = UDim2.new(1, -50, 1, 0), Position = UDim2.new(0, 10, 0, 0),
 	BackgroundTransparency = 1, Text = "Shell Console", TextColor3 = toColor3(THEME.Text),
 	Font = Enum.Font.GothamBold, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Left, Parent = titleBar
-})
-
-local devCheckboxFrame = createUIElement("Frame", {
-	Name = "DevCheckboxFrame", Size = UDim2.new(0, 170, 1, 0),
-	Position = UDim2.new(1, -200, 0, 0), BackgroundTransparency = 1, Parent = titleBar
-})
-
-local devCheckboxButton = createUIElement("TextButton", {
-	Name = "DevCheckboxButton", Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1,
-	Text = "[ ] Enable Developer Console", TextColor3 = toColor3(THEME.Text),
-	Font = Enum.Font.Gotham, TextSize = 11, TextTransparency = 1,
-	TextXAlignment = Enum.TextXAlignment.Left, Parent = devCheckboxFrame
 })
 
 local minButton = createUIElement("TextButton", {
@@ -282,31 +327,34 @@ local minButton = createUIElement("TextButton", {
 	Font = Enum.Font.GothamBold, TextSize = 16, Parent = titleBar
 })
 
-task.spawn(function()
-	while screenGui.Parent do
-		devCheckboxButton.TextTransparency = (_G.ShellDev == true) and 0 or 1
-		task.wait(0.25)
-	end
-end)
+-- =========================================================
+-- Tab Navigation Architecture
+-- =========================================================
+local tabBar = createUIElement("ScrollingFrame", {
+	Name = "TabBar", Size = UDim2.new(1, -10, 0, 28),
+	Position = UDim2.new(0, 5, 0, 35), BackgroundTransparency = 1,
+	BorderSizePixel = 0, ScrollBarThickness = 2,
+	ScrollBarImageColor3 = toColor3(THEME.Accent),
+	AutomaticCanvasSize = Enum.AutomaticSize.X,
+	CanvasSize = UDim2.new(0, 0, 0, 0),
+	Parent = mainFrame
+})
+
+createUIElement("UIListLayout", {
+	SortOrder = Enum.SortOrder.LayoutOrder,
+	FillDirection = Enum.FillDirection.Horizontal,
+	Padding = UDim.new(0, 4),
+	Parent = tabBar
+})
 
 local container = createUIElement("Frame", {
-	Name = "Container", Size = UDim2.new(1, -10, 1, -40),
-	Position = UDim2.new(0, 5, 0, 35), BackgroundTransparency = 1, Parent = mainFrame
+	Name = "Container", Size = UDim2.new(1, -10, 1, -72),
+	Position = UDim2.new(0, 5, 0, 67), BackgroundTransparency = 1, Parent = mainFrame
 })
 
-createUIElement("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 5), Parent = container })
+local tabPages, tabButtons, activeTabName = {}, {}, "Console"
 
-local consoleWrapper = createUIElement("Frame", {
-	Name = "ConsoleWrapper", Size = UDim2.new(1, 0, 1, -35),
-	LayoutOrder = 1, BackgroundTransparency = 1, ClipsDescendants = true, Parent = container
-})
-
-local consoleBgImage = createUIElement("ImageLabel", {
-	Name = "ConsoleBackgroundImage", Size = UDim2.new(1, 0, 1, 0),
-	BackgroundTransparency = 1, ZIndex = 0, Visible = false, Parent = consoleWrapper
-})
-
-local function buildScrollingConsole(name, parent, size, pos)
+local function buildScrollingConsole(name, parent, size, pos, skipLayout)
 	local scroll = createUIElement("ScrollingFrame", {
 		Name = name, Size = size or UDim2.new(1, 0, 1, 0), Position = pos or UDim2.new(0, 0, 0, 0),
 		BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 4,
@@ -314,110 +362,657 @@ local function buildScrollingConsole(name, parent, size, pos)
 		CanvasSize = UDim2.new(0, 0, 0, 0), Parent = parent
 	})
 	applyPadding(scroll, 2, 2, 8, 8)
-	createUIElement("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 2), Parent = scroll })
+	if not skipLayout then
+		createUIElement("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 2), Parent = scroll })
+	end
 	return scroll
 end
 
+local function createTabPage(name)
+	local page = createUIElement("Frame", {
+		Name = name .. "Page", Size = UDim2.new(1, 0, 1, 0),
+		BackgroundTransparency = 1, Visible = false, Parent = container
+	})
+	tabPages[name] = page
+
+	local btn = createUIElement("TextButton", {
+		Name = name .. "TabBtn", Size = UDim2.new(0, 80, 1, -4),
+		BackgroundColor3 = toColor3(THEME.Header, THEME.Border),
+		BorderSizePixel = 0, Text = name, TextColor3 = toColor3(THEME.Placeholder),
+		Font = Enum.Font.GothamBold, TextSize = 10, Parent = tabBar
+	})
+	applyCorners(btn, UDim.new(0, 4))
+	tabButtons[name] = btn
+
+	local indicator = createUIElement("Frame", {
+		Name = "Indicator", Size = UDim2.new(1, 0, 0, 2),
+		Position = UDim2.new(0, 0, 1, -2), BackgroundColor3 = toColor3(THEME.Accent),
+		BorderSizePixel = 0, Visible = false, Parent = btn
+	})
+
+	return page, btn, indicator
+end
+
+local function switchTab(targetName)
+	activeTabName = targetName
+	for name, page in pairs(tabPages) do
+		local isTarget = (name == targetName)
+		page.Visible = isTarget
+		local btn = tabButtons[name]
+		if btn then
+			btn.TextColor3 = toColor3(isTarget and THEME.Accent or THEME.Placeholder)
+			local ind = btn:FindFirstChild("Indicator")
+			if ind then ind.Visible = isTarget end
+		end
+	end
+end
+
+local function updateTabVisibilities()
+	local devEnabled = _G.ShellDev == true
+	for name, btn in pairs(tabButtons) do
+		if name == "Statistics" or name == "Dev Console" then
+			btn.Visible = devEnabled
+		elseif TAB_VISIBILITY_SETTINGS[name] ~= nil then
+			btn.Visible = TAB_VISIBILITY_SETTINGS[name]
+		end
+	end
+
+	if not devEnabled and (activeTabName == "Statistics" or activeTabName == "Dev Console") then
+		switchTab("Console")
+	elseif TAB_VISIBILITY_SETTINGS[activeTabName] == false then
+		switchTab("Console")
+	end
+end
+
+local consolePage, consoleBtn = createTabPage("Console")
+local scriptsPage, scriptsBtn = createTabPage("Scripts")
+local waypointsPage, waypointsBtn = createTabPage("Waypoints")
+local statsPage, statsBtn = createTabPage("Statistics")
+local devConsolePage, devConsoleBtn = createTabPage("Dev Console")
+local settingsPage, settingsBtn = createTabPage("Settings")
+
+consoleBtn.MouseButton1Click:Connect(function() switchTab("Console") end)
+scriptsBtn.MouseButton1Click:Connect(function() switchTab("Scripts") end)
+waypointsBtn.MouseButton1Click:Connect(function() switchTab("Waypoints") end)
+statsBtn.MouseButton1Click:Connect(function() switchTab("Statistics") end)
+devConsoleBtn.MouseButton1Click:Connect(function() switchTab("Dev Console") end)
+settingsBtn.MouseButton1Click:Connect(function() switchTab("Settings") end)
+
+task.spawn(function()
+	while screenGui.Parent do
+		updateTabVisibilities()
+		task.wait(0.25)
+	end
+end)
+
+-- ---------------------------------------------------------
+-- TAB 1: CONSOLE & REWORKED AUTOCOMPLETE
+-- ---------------------------------------------------------
+createUIElement("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 4), Parent = consolePage })
+
+local consoleFilterBar = createUIElement("Frame", {
+	Name = "FilterBar", Size = UDim2.new(1, 0, 0, 26),
+	LayoutOrder = 1, BackgroundColor3 = Color3.fromRGB(28, 28, 34), BorderSizePixel = 0, Parent = consolePage
+})
+applyCorners(consoleFilterBar, UDim.new(0, 4))
+
+local searchBoxContainer = createUIElement("Frame", {
+	Name = "SearchBoxContainer", Size = UDim2.new(1, -165, 1, -4), Position = UDim2.new(0, 2, 0, 2),
+	BackgroundColor3 = Color3.fromRGB(20, 20, 24), BorderSizePixel = 0, Parent = consoleFilterBar
+})
+applyCorners(searchBoxContainer, UDim.new(0, 4))
+
+local searchInput = createUIElement("TextBox", {
+	Name = "SearchInput", Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1,
+	Text = "", PlaceholderText = "Search console logs...", TextColor3 = toColor3(THEME.Text),
+	PlaceholderColor3 = toColor3(THEME.Placeholder), Font = Enum.Font.Gotham, TextSize = 11,
+	TextXAlignment = Enum.TextXAlignment.Left, ClearTextOnFocus = false, Parent = searchBoxContainer
+})
+applyPadding(searchInput, 1, 1, 6, 6)
+
+local function createFilterToggle(name, posX, initialVal, activeColor, callback)
+	local toggleBtn = createUIElement("TextButton", {
+		Name = name .. "Toggle", Size = UDim2.new(0, 50, 1, -4), Position = UDim2.new(1, posX, 0, 2),
+		BackgroundColor3 = initialVal and activeColor or Color3.fromRGB(40, 40, 50),
+		Text = name, TextColor3 = initialVal and Color3.new(1, 1, 1) or toColor3(THEME.Placeholder),
+		Font = Enum.Font.GothamBold, TextSize = 10, Parent = consoleFilterBar
+	})
+	applyCorners(toggleBtn, UDim.new(0, 4))
+	
+	toggleBtn.MouseButton1Click:Connect(function()
+		local newState = callback()
+		toggleBtn.BackgroundColor3 = newState and activeColor or Color3.fromRGB(40, 40, 50)
+		toggleBtn.TextColor3 = newState and Color3.new(1, 1, 1) or toColor3(THEME.Placeholder)
+	end)
+end
+
+local consoleWrapper = createUIElement("Frame", {
+	Name = "ConsoleWrapper", Size = UDim2.new(1, 0, 1, -65),
+	LayoutOrder = 2, BackgroundTransparency = 1, ClipsDescendants = true, Parent = consolePage
+})
+
 local consoleFrame = buildScrollingConsole("ConsoleFrame", consoleWrapper)
 
-local devConsoleContainer = createUIElement("Frame", {
-	Name = "DevConsoleContainer", Size = UDim2.new(1, 0, 1, 0),
-	BackgroundTransparency = 1, Visible = false, ZIndex = 1, Parent = consoleWrapper
+local commandBarContainer = createUIElement("Frame", {
+	Name = "CommandBarContainer", Size = UDim2.new(1, 0, 0, 28),
+	LayoutOrder = 3, BackgroundColor3 = Color3.fromRGB(30, 30, 35), BorderSizePixel = 0, Parent = consolePage
 })
+applyCorners(commandBarContainer)
 
-local devConsoleFrame = buildScrollingConsole("DevConsoleFrame", devConsoleContainer, UDim2.new(0.75, -5, 1, 0))
-
-local statsFrame = createUIElement("ScrollingFrame", {
-	Name = "StatsFrame", Size = UDim2.new(0.25, 0, 1, 0), Position = UDim2.new(0.75, 5, 0, 0),
-	BackgroundColor3 = Color3.fromRGB(20, 20, 20), BackgroundTransparency = 0.3, BorderSizePixel = 0,
-	ScrollBarThickness = 4, ScrollBarImageColor3 = toColor3(THEME.Accent), AutomaticCanvasSize = Enum.AutomaticSize.Y,
-	CanvasSize = UDim2.new(0, 0, 0, 0), Parent = devConsoleContainer
+local commandBar = createUIElement("TextBox", {
+	Name = "CommandBar", Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1,
+	TextColor3 = toColor3(THEME.Text), PlaceholderColor3 = toColor3(THEME.Placeholder),
+	PlaceholderText = "Type a command...", Font = THEME.CommandFont or Enum.Font.Code,
+	TextSize = THEME.CommandFontSize or 14, TextXAlignment = Enum.TextXAlignment.Left,
+	Text = "", ClearTextOnFocus = false, Parent = commandBarContainer
 })
-applyCorners(statsFrame)
-applyPadding(statsFrame, 4, 4, 8, 8)
-createUIElement("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 4), Parent = statsFrame })
+applyPadding(commandBar, 2, 2, 8, 8)
 
-local function createStatLabel(text, parent, isHeader)
-	return createUIElement("TextLabel", {
-		Size = UDim2.new(1, -6, 0, isHeader and 18 or 16),
-		BackgroundTransparency = 1,
-		Font = isHeader and Enum.Font.GothamBold or (THEME.ConsoleFont or Enum.Font.Code),
-		TextSize = isHeader and 12 or 11,
-		TextColor3 = toColor3(isHeader and THEME.Accent or THEME.Text),
-		Text = text,
-		TextXAlignment = isHeader and Enum.TextXAlignment.Center or Enum.TextXAlignment.Left,
-		Parent = parent
-	})
+-- Rebuilt Autocomplete Menu Frame & State
+local suggestionFrame = createUIElement("Frame", {
+	Name = "SuggestionFrame", Size = UDim2.new(1, 0, 0, 0), Position = UDim2.new(0, 0, 0, -5),
+	AnchorPoint = Vector2.new(0, 1), BackgroundColor3 = toColor3(THEME.Background),
+	BorderSizePixel = 0, Visible = false, ZIndex = 50, Parent = commandBarContainer
+})
+applyCorners(suggestionFrame)
+createUIElement("UIStroke", { Color = toColor3(THEME.Border), Thickness = 1, Parent = suggestionFrame })
+
+local suggestionList = buildScrollingConsole("SuggestionList", suggestionFrame)
+suggestionList.ZIndex = 51
+
+local commands, matches, selectedIndex = {}, {}, 1
+
+local function applyConsoleFilters()
+	for _, child in ipairs(consoleFrame:GetChildren()) do
+		if child:IsA("TextBox") then
+			local entryType = child:GetAttribute("LogType") or "info"
+			local textMatch = (LOG_FILTER_STATE.SearchText == "") or (child.Text:lower():find(LOG_FILTER_STATE.SearchText:lower(), 1, true) ~= nil)
+			
+			local typeMatch = false
+			if entryType == "info" and LOG_FILTER_STATE.ShowInfo then typeMatch = true
+			elseif entryType == "warn" and LOG_FILTER_STATE.ShowWarn then typeMatch = true
+			elseif entryType == "error" and LOG_FILTER_STATE.ShowError then typeMatch = true
+			end
+			
+			child.Visible = textMatch and typeMatch
+		end
+	end
 end
 
-local function createDivider(parent)
-	return createUIElement("Frame", {
-		Size = UDim2.new(1, -6, 0, 1),
-		BackgroundColor3 = toColor3(THEME.Border),
-		BorderSizePixel = 0, Parent = parent
-	})
+searchInput:GetPropertyChangedSignal("Text"):Connect(function()
+	LOG_FILTER_STATE.SearchText = searchInput.Text
+	applyConsoleFilters()
+end)
+
+createFilterToggle("Info", -160, LOG_FILTER_STATE.ShowInfo, toColor3(THEME.Accent), function()
+	LOG_FILTER_STATE.ShowInfo = not LOG_FILTER_STATE.ShowInfo
+	applyConsoleFilters()
+	return LOG_FILTER_STATE.ShowInfo
+end)
+
+createFilterToggle("Warn", -105, LOG_FILTER_STATE.ShowWarn, toColor3(THEME.Console_Warn), function()
+	LOG_FILTER_STATE.ShowWarn = not LOG_FILTER_STATE.ShowWarn
+	applyConsoleFilters()
+	return LOG_FILTER_STATE.ShowWarn
+end)
+
+createFilterToggle("Error", -50, LOG_FILTER_STATE.ShowError, toColor3(THEME.Console_Error), function()
+	LOG_FILTER_STATE.ShowError = not LOG_FILTER_STATE.ShowError
+	applyConsoleFilters()
+	return LOG_FILTER_STATE.ShowError
+end)
+
+-- Rebuilt Autocomplete Logic Engine
+local function applySuggestion(val)
+	commandBar.Text = val
+	suggestionFrame.Visible = false
+	task.defer(function()
+		commandBar.CursorPosition = #commandBar.Text + 1
+		commandBar:CaptureFocus()
+	end)
 end
 
--- Dynamic Stat Panels Creation
-createStatLabel("-- STATISTICS --", statsFrame, true)
-local fpsLabel = createStatLabel("FPS: --", statsFrame)
-local avgFpsLabel = createStatLabel("Avg FPS: --", statsFrame)
-local pingLabel = createStatLabel("Ping: -- ms", statsFrame)
-local avgPingLabel = createStatLabel("Avg Ping: -- ms", statsFrame)
-local memoryLabel = createStatLabel("Mem: -- MB", statsFrame)
+local function renderSuggestions()
+	for _, child in ipairs(suggestionList:GetChildren()) do
+		if child:IsA("TextButton") then child:Destroy() end
+	end
 
-createDivider(statsFrame)
-createStatLabel("Server", statsFrame, true)
-local gameNameLabel = createStatLabel("Game: --", statsFrame)
-local gameIdLabel = createStatLabel("Place ID: --", statsFrame)
-local playersCountLabel = createStatLabel("Players: --", statsFrame)
-local serverTimeLabel = createStatLabel("Time: --", statsFrame)
-local timeInGameLabel = createStatLabel("Session: --", statsFrame)
-local serverLocLabel = createStatLabel("Server Region: --", statsFrame)
+	if #matches == 0 then
+		suggestionFrame.Visible = false
+		return
+	end
 
-createDivider(statsFrame)
-createStatLabel("Player", statsFrame, true)
-local teamLabel = createStatLabel("Team: --", statsFrame)
-local posLabel = createStatLabel("Pos: --", statsFrame)
-local seatedLabel = createStatLabel("Seated: --", statsFrame)
-local healthLabel = createStatLabel("Health: --", statsFrame)
-local speedLabel = createStatLabel("WalkSpeed: --", statsFrame)
-local actualSpeedLabel = createStatLabel("Actual Speed: --", statsFrame)
-local jumpLabel = createStatLabel("JumpPower: --", statsFrame)
-local stateLabel = createStatLabel("State: --", statsFrame)
-local toolLabel = createStatLabel("Tool: --", statsFrame)
+	suggestionFrame.Visible = true
+	local rowHeight = 24
+	local displayedCount = math.min(#matches, 5)
+	suggestionFrame.Size = UDim2.new(1, 0, 0, (displayedCount * rowHeight) + 8)
 
-createDivider(statsFrame)
-createStatLabel("Shell", statsFrame, true)
-local shellRunningLabel = createStatLabel("Running: --", statsFrame)
-local shellDevLabel = createStatLabel("Dev: --", statsFrame)
-local shellThemeLabel = createStatLabel("Theme: --", statsFrame)
-local shellFuncsLabel = createStatLabel("Functions: --", statsFrame)
-local shellBindsLabel = createStatLabel("Keybinds: --", statsFrame)
+	for i, match in ipairs(matches) do
+		local isSelected = (i == selectedIndex)
+		local sugBtn = createUIElement("TextButton", {
+			Name = "Sug_" .. match.Name,
+			Size = UDim2.new(1, 0, 0, rowHeight - 2),
+			BackgroundColor3 = isSelected and Color3.fromRGB(45, 45, 60) or Color3.fromRGB(25, 25, 30),
+			BackgroundTransparency = isSelected and 0 or 0.5,
+			Text = "  " .. match.Display,
+			TextColor3 = isSelected and toColor3(THEME.Accent) or toColor3(THEME.SuggestionTextColor),
+			Font = THEME.CommandFont or Enum.Font.Code,
+			TextSize = THEME.SuggestionFontSize or 13,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			ZIndex = 52,
+			Parent = suggestionList
+		})
+		applyCorners(sugBtn, UDim.new(0, 4))
 
--- Newly Added Commit Info Labels
-local compilerCommitLabel = createStatLabel("Compiler: Loading...", statsFrame)
-local uiCommitLabel = createStatLabel("UI: Loading...", statsFrame)
-local funcCommitLabel = createStatLabel("Functions: Loading...", statsFrame)
+		sugBtn.MouseButton1Click:Connect(function()
+			applySuggestion(match.Value)
+		end)
+	end
+end
 
--- Async load commit details
+local function updateSuggestions()
+	local text = commandBar.Text
+	matches = {}
+
+	if text == "" then
+		suggestionFrame.Visible = false
+		return
+	end
+
+	local parts = string.split(text, " ")
+	local inputCmd = parts[1]:lower()
+
+	if #parts <= 1 then
+		for name, cmd in pairs(commands) do
+			if name:sub(1, #inputCmd) == inputCmd and cmd.Category ~= "Hidden" then
+				local argsDisplay = (cmd.Arguments and #cmd.Arguments > 0) and (" " .. table.concat(cmd.Arguments, " ")) or ""
+				table.insert(matches, {
+					Name = cmd.Name,
+					Display = cmd.Name .. argsDisplay,
+					Value = cmd.Name .. " "
+				})
+			end
+		end
+		table.sort(matches, function(a, b) return a.Name < b.Name end)
+	end
+
+	if selectedIndex > #matches then selectedIndex = 1 end
+	renderSuggestions()
+end
+
+UserInputService.InputBegan:Connect(function(input, processed)
+	if suggestionFrame.Visible and #matches > 0 then
+		if input.KeyCode == Enum.KeyCode.Tab then
+			applySuggestion(matches[selectedIndex].Value)
+		elseif input.KeyCode == Enum.KeyCode.Down then
+			selectedIndex = (selectedIndex % #matches) + 1
+			renderSuggestions()
+		elseif input.KeyCode == Enum.KeyCode.Up then
+			selectedIndex = (selectedIndex - 2) % #matches + 1
+			renderSuggestions()
+		end
+	end
+end)
+
+-- ---------------------------------------------------------
+-- TAB 2: SCRIPTS / QUICK ACTIONS
+-- ---------------------------------------------------------
+local scriptScroll = buildScrollingConsole("ScriptScroll", scriptsPage, nil, nil, true)
+scriptScroll.Size = UDim2.new(1, 0, 1, 0)
+
+createUIElement("UIGridLayout", {
+	CellSize = UDim2.new(0, 142, 0, 32),
+	CellPadding = UDim2.new(0, 6, 0, 6),
+	SortOrder = Enum.SortOrder.LayoutOrder,
+	Parent = scriptScroll
+})
+
+local quickScripts = {
+	{ Name = "Clear Console", Action = function() if _G.ShellClearConsole then _G.ShellClearConsole() end end },
+	{ Name = "Anti-AFK", Action = function()
+		SCRIPT_STATES.AntiAFK = not SCRIPT_STATES.AntiAFK
+		if SCRIPT_STATES.AntiAFK then
+			localPlayer.Idled:Connect(function()
+				if SCRIPT_STATES.AntiAFK then
+					VirtualUser:CaptureController()
+					VirtualUser:ClickButton2(Vector2.zero)
+				end
+			end)
+		end
+	end },
+	{ Name = "Toggle Fly", Action = function()
+		SCRIPT_STATES.Fly = not SCRIPT_STATES.Fly
+		local char = localPlayer.Character
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		if not hrp then return end
+
+		if SCRIPT_STATES.Fly then
+			local bv = Instance.new("BodyVelocity", hrp)
+			bv.Name = "ShellFlyVelocity"
+			bv.MaxForce = Vector3.new(1e9, 1e9, 1e9)
+			bv.Velocity = Vector3.zero
+
+			local bg = Instance.new("BodyGyro", hrp)
+			bg.Name = "ShellFlyGyro"
+			bg.MaxTorque = Vector3.new(1e9, 1e9, 1e9)
+			bg.CFrame = hrp.CFrame
+
+			task.spawn(function()
+				while SCRIPT_STATES.Fly and hrp:FindFirstChild("ShellFlyVelocity") do
+					local cam = workspace.CurrentCamera
+					local moveDir = Vector3.zero
+					if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDir += cam.CFrame.LookVector end
+					if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDir -= cam.CFrame.LookVector end
+					if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDir -= cam.CFrame.RightVector end
+					if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDir += cam.CFrame.RightVector end
+					if UserInputService:IsKeyDown(Enum.KeyCode.Space) then moveDir += Vector3.new(0, 1, 0) end
+					if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then moveDir -= Vector3.new(0, 1, 0) end
+
+					bv.Velocity = moveDir * 50
+					bg.CFrame = cam.CFrame
+					RunService.RenderStepped:Wait()
+				end
+				bv:Destroy()
+				bg:Destroy()
+			end)
+		end
+	end },
+	{ Name = "FPS Booster", Action = function()
+		for _, v in ipairs(workspace:GetDescendants()) do
+			if v:IsA("BasePart") then
+				v.Material = Enum.Material.SmoothPlastic
+				v.Reflectance = 0
+			elseif v:IsA("Decal") or v:IsA("Texture") then
+				v:Destroy()
+			elseif v:IsA("ParticleEmitter") or v:IsA("Trail") then
+				v.Enabled = false
+			end
+		end
+	end },
+	{ Name = "FOV 120", Action = function() workspace.CurrentCamera.FieldOfView = 120 end },
+	{ Name = "Reset FOV", Action = function() workspace.CurrentCamera.FieldOfView = 70 end },
+	{ Name = "Click Teleport", Action = function()
+		local mouse = localPlayer:GetMouse()
+		local char = localPlayer.Character
+		if char and mouse.Hit then char:PivotTo(mouse.Hit + Vector3.new(0, 3, 0)) end
+	end },
+	{ Name = "Copy CFrame", Action = function()
+		local char = localPlayer.Character
+		if char and setclipboard then setclipboard(tostring(char:GetPivot())) end
+	end },
+	{ Name = "Hop Small Server", Action = function()
+		local api = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/0?sortOrder=Asc&limit=100"
+		local ok, body = pcall(function() return game:HttpGet(api) end)
+		if ok then
+			local data = HttpService:JSONDecode(body)
+			for _, server in ipairs(data.data) do
+				if server.playing < server.maxPlayers and server.id ~= game.JobId then
+					TeleportService:TeleportToPlaceInstance(game.PlaceId, server.id, localPlayer)
+					break
+				end
+			end
+		end
+	end },
+	{ Name = "Toggle Fullbright", Action = function()
+		SCRIPT_STATES.Fullbright = not SCRIPT_STATES.Fullbright
+		Lighting.Ambient = SCRIPT_STATES.Fullbright and Color3.new(1, 1, 1) or Color3.fromRGB(128, 128, 128)
+		Lighting.Brightness = SCRIPT_STATES.Fullbright and 2 or 1
+		Lighting.GlobalShadows = not SCRIPT_STATES.Fullbright
+	end },
+	{ Name = "Toggle Inf Jump", Action = function() SCRIPT_STATES.InfJump = not SCRIPT_STATES.InfJump end },
+	{ Name = "Toggle Noclip", Action = function() SCRIPT_STATES.Noclip = not SCRIPT_STATES.Noclip end },
+	{ Name = "Re-anchor Char", Action = function()
+		local char = localPlayer.Character
+		if char and char:FindFirstChild("HumanoidRootPart") then
+			char.HumanoidRootPart.Anchored = true
+			task.wait(0.2)
+			char.HumanoidRootPart.Anchored = false
+		end
+	end },
+	{ Name = "Reset Character", Action = function()
+		local hum = localPlayer.Character and localPlayer.Character:FindFirstChildOfClass("Humanoid")
+		if hum then hum.Health = 0 end
+	end },
+	{ Name = "Copy Position", Action = function()
+		local char = localPlayer.Character
+		if char and setclipboard then
+			local pos = char:GetPivot().Position
+			setclipboard(string.format("%.2f, %.2f, %.2f", pos.X, pos.Y, pos.Z))
+		end
+	end },
+	{ Name = "Copy Place ID", Action = function() if setclipboard then setclipboard(tostring(game.PlaceId)) end end },
+	{ Name = "Copy Job ID", Action = function() if setclipboard then setclipboard(tostring(game.JobId)) end end },
+	{ Name = "Remove Fog", Action = function()
+		Lighting.FogEnd = 9e9
+		for _, v in ipairs(Lighting:GetChildren()) do if v:IsA("Atmosphere") then v:Destroy() end end
+	end },
+	{ Name = "Speed +10", Action = function()
+		local hum = localPlayer.Character and localPlayer.Character:FindFirstChildOfClass("Humanoid")
+		if hum then hum.WalkSpeed = hum.WalkSpeed + 10 end
+	end },
+	{ Name = "Speed Reset", Action = function()
+		local hum = localPlayer.Character and localPlayer.Character:FindFirstChildOfClass("Humanoid")
+		if hum then hum.WalkSpeed = 16 end
+	end },
+	{ Name = "Jump +20", Action = function()
+		local hum = localPlayer.Character and localPlayer.Character:FindFirstChildOfClass("Humanoid")
+		if hum then hum.JumpPower = hum.JumpPower + 20 end
+	end },
+	{ Name = "Jump Reset", Action = function()
+		local hum = localPlayer.Character and localPlayer.Character:FindFirstChildOfClass("Humanoid")
+		if hum then hum.JumpPower = 50 end
+	end },
+	{ Name = "Unlock Camera", Action = function()
+		localPlayer.CameraMaxZoomDistance, localPlayer.CameraMinZoomDistance = 100000, 0.5
+		localPlayer.CameraMode = Enum.CameraMode.Classic
+	end },
+	{ Name = "Rejoin Server", Action = function() TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, localPlayer) end },
+}
+
+UserInputService.JumpRequest:Connect(function()
+	if SCRIPT_STATES.InfJump then
+		local hum = localPlayer.Character and localPlayer.Character:FindFirstChildOfClass("Humanoid")
+		if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
+	end
+end)
+
+RunService.Stepped:Connect(function()
+	if SCRIPT_STATES.Noclip and localPlayer.Character then
+		for _, part in ipairs(localPlayer.Character:GetDescendants()) do
+			if part:IsA("BasePart") and part.CanCollide then part.CanCollide = false end
+		end
+	end
+end)
+
+for _, scriptData in ipairs(quickScripts) do
+	local btn = createUIElement("TextButton", {
+		Name = scriptData.Name .. "Btn", BackgroundColor3 = Color3.fromRGB(32, 32, 40),
+		Text = scriptData.Name, TextColor3 = toColor3(THEME.Text), Font = Enum.Font.Gotham, TextSize = 10, Parent = scriptScroll
+	})
+	applyCorners(btn)
+	btn.MouseButton1Click:Connect(function() pcall(scriptData.Action) end)
+end
+
+-- ---------------------------------------------------------
+-- TAB 3: WAYPOINTS
+-- ---------------------------------------------------------
+createUIElement("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 6), Parent = waypointsPage })
+
+local waypointBar = createUIElement("Frame", {
+	Name = "WaypointInputBar", Size = UDim2.new(1, 0, 0, 30),
+	BackgroundColor3 = Color3.fromRGB(28, 28, 34), BorderSizePixel = 0, Parent = waypointsPage
+})
+applyCorners(waypointBar)
+
+local waypointNameBox = createUIElement("TextBox", {
+	Name = "WaypointNameBox", Size = UDim2.new(1, -110, 1, 0), BackgroundTransparency = 1,
+	Text = "", PlaceholderText = "Enter waypoint name...", TextColor3 = toColor3(THEME.Text),
+	PlaceholderColor3 = toColor3(THEME.Placeholder), Font = Enum.Font.Gotham, TextSize = 12,
+	ClearTextOnFocus = false, Parent = waypointBar
+})
+applyPadding(waypointNameBox, 2, 2, 8, 8)
+
+local addWaypointBtn = createUIElement("TextButton", {
+	Name = "AddWaypointBtn", Size = UDim2.new(0, 100, 1, -4), Position = UDim2.new(1, -102, 0, 2),
+	BackgroundColor3 = toColor3(THEME.Accent), Text = "+ Save Pos", TextColor3 = Color3.new(1, 1, 1),
+	Font = Enum.Font.GothamBold, TextSize = 11, Parent = waypointBar
+})
+applyCorners(addWaypointBtn)
+
+local waypointsScroll = buildScrollingConsole("WaypointsScroll", waypointsPage)
+waypointsScroll.Size = UDim2.new(1, 0, 1, -36)
+
+local function refreshWaypointUI()
+	for _, child in ipairs(waypointsScroll:GetChildren()) do
+		if child:IsA("Frame") then child:Destroy() end
+	end
+
+	for name, cfStr in pairs(WAYPOINTS) do
+		local row = createUIElement("Frame", {
+			Name = "WpRow_" .. name, Size = UDim2.new(1, -4, 0, 32),
+			BackgroundColor3 = Color3.fromRGB(32, 32, 40), BorderSizePixel = 0, Parent = waypointsScroll
+		})
+		applyCorners(row)
+
+		createUIElement("TextLabel", {
+			Size = UDim2.new(0.4, 0, 1, 0), Position = UDim2.new(0, 10, 0, 0),
+			BackgroundTransparency = 1, Text = name, TextColor3 = toColor3(THEME.Text),
+			Font = Enum.Font.GothamBold, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left, Parent = row
+		})
+
+		local tpBtn = createUIElement("TextButton", {
+			Size = UDim2.new(0, 55, 0, 22), Position = UDim2.new(1, -170, 0.5, -11),
+			BackgroundColor3 = toColor3(THEME.Accent), Text = "Teleport", TextColor3 = Color3.new(1, 1, 1),
+			Font = Enum.Font.GothamBold, TextSize = 10, Parent = row
+		})
+		applyCorners(tpBtn, UDim.new(0, 4))
+
+		local copyBtn = createUIElement("TextButton", {
+			Size = UDim2.new(0, 50, 0, 22), Position = UDim2.new(1, -110, 0.5, -11),
+			BackgroundColor3 = Color3.fromRGB(50, 50, 65), Text = "Copy", TextColor3 = toColor3(THEME.Text),
+			Font = Enum.Font.Gotham, TextSize = 10, Parent = row
+		})
+		applyCorners(copyBtn, UDim.new(0, 4))
+
+		local delBtn = createUIElement("TextButton", {
+			Size = UDim2.new(0, 50, 0, 22), Position = UDim2.new(1, -55, 0.5, -11),
+			BackgroundColor3 = toColor3(THEME.Console_Error), Text = "Delete", TextColor3 = Color3.new(1, 1, 1),
+			Font = Enum.Font.GothamBold, TextSize = 10, Parent = row
+		})
+		applyCorners(delBtn, UDim.new(0, 4))
+
+		tpBtn.MouseButton1Click:Connect(function()
+			local char = localPlayer.Character
+			if char then
+				local coords = {}
+				for val in cfStr:gmatch("[^,%s]+") do table.insert(coords, tonumber(val)) end
+				if #coords >= 3 then
+					local targetCF = CFrame.new(coords[1], coords[2], coords[3])
+					if #coords >= 6 then
+						targetCF = CFrame.new(coords[1], coords[2], coords[3]) * CFrame.Angles(coords[4], coords[5], coords[6])
+					end
+					char:PivotTo(targetCF)
+				end
+			end
+		end)
+
+		copyBtn.MouseButton1Click:Connect(function()
+			if setclipboard then setclipboard(cfStr) end
+		end)
+
+		delBtn.MouseButton1Click:Connect(function()
+			WAYPOINTS[name] = nil
+			saveWaypointsToFile()
+			refreshWaypointUI()
+		end)
+	end
+end
+
+addWaypointBtn.MouseButton1Click:Connect(function()
+	local name = cleanStr(waypointNameBox.Text)
+	local char = localPlayer.Character
+	if name ~= "" and char then
+		local cf = char:GetPivot()
+		local rx, ry, rz = cf:ToEulerAnglesXYZ()
+		WAYPOINTS[name] = string.format("%.2f, %.2f, %.2f, %.2f, %.2f, %.2f", cf.X, cf.Y, cf.Z, rx, ry, rz)
+		saveWaypointsToFile()
+		waypointNameBox.Text = ""
+		refreshWaypointUI()
+	end
+end)
+
+refreshWaypointUI()
+
+-- ---------------------------------------------------------
+-- TAB 4: STATISTICS
+-- ---------------------------------------------------------
+local statsScroll = buildScrollingConsole("StatsPageScroll", statsPage)
+statsScroll.Size = UDim2.new(1, 0, 1, 0)
+
+createStatLabel("-- STATISTICS & SYSTEM PERFORMANCE --", statsScroll, true)
+local fpsLabel = createStatLabel("FPS: --", statsScroll)
+local avgFpsLabel = createStatLabel("Avg FPS: --", statsScroll)
+local frameTimeLabel = createStatLabel("Frame Time: -- ms", statsScroll)
+local pingLabel = createStatLabel("Ping: -- ms", statsScroll)
+local avgPingLabel = createStatLabel("Avg Ping: -- ms", statsScroll)
+local memoryLabel = createStatLabel("Mem: -- MB", statsScroll)
+local physicsMemLabel = createStatLabel("Physics Mem: -- MB", statsScroll)
+
+createDivider(statsScroll)
+createStatLabel("Advanced Network & Hardware", statsScroll, true)
+local packetLossLabel = createStatLabel("Packet Loss: --%", statsScroll)
+local networkInLabel = createStatLabel("Data Recv: -- KB/s", statsScroll)
+local networkOutLabel = createStatLabel("Data Sent: -- KB/s", statsScroll)
+
+createDivider(statsScroll)
+createStatLabel("Memory Breakdowns", statsScroll, true)
+local luaHeapMemLabel = createStatLabel("Lua Heap: -- MB", statsScroll)
+local textureMemLabel = createStatLabel("Texture Mem: -- MB", statsScroll)
+local soundMemLabel = createStatLabel("Audio Mem: -- MB", statsScroll)
+local guiMemLabel = createStatLabel("GUI Mem: -- MB", statsScroll)
+
+createDivider(statsScroll)
+createStatLabel("Server & Environment", statsScroll, true)
+local gameNameLabel = createStatLabel("Game: --", statsScroll)
+local gameIdLabel = createStatLabel("Place ID: --", statsScroll)
+local jobIdLabel = createStatLabel("Job ID: --", statsScroll)
+local playersCountLabel = createStatLabel("Players: --", statsScroll)
+local maxPlayersLabel = createStatLabel("Max Players: --", statsScroll)
+local serverTimeLabel = createStatLabel("Time: --", statsScroll)
+local timeInGameLabel = createStatLabel("Session: --", statsScroll)
+local serverLocLabel = createStatLabel("Server Region: --", statsScroll)
+
+createDivider(statsScroll)
+createStatLabel("Player Stats", statsScroll, true)
+local teamLabel = createStatLabel("Team: --", statsScroll)
+local posLabel = createStatLabel("Pos: --", statsScroll)
+local rotLabel = createStatLabel("Rot: --", statsScroll)
+local seatedLabel = createStatLabel("Seated: --", statsScroll)
+local healthLabel = createStatLabel("Health: --", statsScroll)
+local speedLabel = createStatLabel("WalkSpeed: --", statsScroll)
+local actualSpeedLabel = createStatLabel("Actual Speed: --", statsScroll)
+
+createDivider(statsScroll)
+createStatLabel("Shell System State", statsScroll, true)
+local shellRunningLabel = createStatLabel("Running: --", statsScroll)
+local shellDevLabel = createStatLabel("Dev: --", statsScroll)
+local shellThemeLabel = createStatLabel("Theme: --", statsScroll)
+
+local compilerCommitLabel = createStatLabel("Compiler: Loading...", statsScroll)
+local uiCommitLabel = createStatLabel("UI: Loading...", statsScroll)
+
 task.spawn(function()
 	local compilerData = fetchLatestCommit("Core/compiler.lua")
 	compilerCommitLabel.Text = string.format("Compiler: %s (%s)", compilerData.Date, compilerData.Message)
 
 	local uiData = fetchLatestCommit("Core/ui.lua")
 	uiCommitLabel.Text = string.format("UI: %s (%s)", uiData.Date, uiData.Message)
-
-	local funcData = fetchLatestCommit("Core/functions.lua")
-	funcCommitLabel.Text = string.format("FuncMgr: %s (%s)", funcData.Date, funcData.Message)
 end)
 
--- Stat Updater Loop
 task.spawn(function()
-	local frameCount, lastTime, currentFps = 0, os.clock(), 60
-	local sessionStartTime, historyTimer = os.clock(), os.clock()
+	local frameCount, lastTime, currentFps, lastFrameDelta = 0, os.clock(), 60, 0
+	local sessionStartTime = os.clock()
 	local fpsHistory, pingHistory, maxHistorySamples = {}, {}, 120
-	local baselineFps, baselinePing, baselineMem = 60, 0, 0
 	local serverCountry, gameName = "Unknown", "Unknown"
 	local lastPosition, lastPosTime = nil, os.clock()
 
@@ -431,8 +1026,9 @@ task.spawn(function()
 		if ok and info and info.Name then gameName = info.Name end
 	end)
 
-	RunService.RenderStepped:Connect(function()
+	RunService.RenderStepped:Connect(function(dt)
 		frameCount += 1
+		lastFrameDelta = dt
 		local now = os.clock()
 		if now - lastTime >= 1 then
 			currentFps = math.floor(frameCount / (now - lastTime))
@@ -440,99 +1036,179 @@ task.spawn(function()
 		end
 	end)
 
-	while screenGui.Parent do
-		if devConsoleContainer.Visible then
+while screenGui.Parent do
+		if statsPage.Visible then
 			local now = os.clock()
-			local pingItem = Stats.Network.ServerStatsItem:FindFirstChild("Data Ping")
-			local currentPing = pingItem and math.floor(pingItem:GetValue()) or 0
-			local currentMem = math.floor(Stats:GetTotalMemoryUsageMb())
 
-			table.insert(fpsHistory, currentFps)
-			table.insert(pingHistory, currentPing)
-			if #fpsHistory > maxHistorySamples then table.remove(fpsHistory, 1) end
-			if #pingHistory > maxHistorySamples then table.remove(pingHistory, 1) end
+			-- Performance & Ping
+			pcall(function()
+				local pingItem = Stats:FindFirstChild("Network") and Stats.Network:FindFirstChild("ServerStatsItem") and Stats.Network.ServerStatsItem:FindFirstChild("Data Ping")
+				local currentPing = pingItem and math.floor(pingItem:GetValue()) or 0
+				local currentMem = math.floor(Stats:GetTotalMemoryUsageMb())
+				local physMem = math.floor(Stats:GetMemoryUsageMbForTag(Enum.DeveloperMemoryTag.PhysicsParts))
 
-			local sumFps, sumPing = 0, 0
-			for _, v in ipairs(fpsHistory) do sumFps += v end
-			for _, v in ipairs(pingHistory) do sumPing += v end
-			local avgFps = #fpsHistory > 0 and math.floor(sumFps / #fpsHistory) or currentFps
-			local avgPing = #pingHistory > 0 and math.floor(sumPing / #pingHistory) or currentPing
+				table.insert(fpsHistory, currentFps)
+				table.insert(pingHistory, currentPing)
+				if #fpsHistory > maxHistorySamples then table.remove(fpsHistory, 1) end
+				if #pingHistory > maxHistorySamples then table.remove(pingHistory, 1) end
 
-			if now - historyTimer >= 5 then
-				baselineFps, baselinePing, baselineMem = currentFps, currentPing, currentMem
-				historyTimer = now
-			end
+				local sumFps, sumPing = 0, 0
+				for _, v in ipairs(fpsHistory) do sumFps += v end
+				for _, v in ipairs(pingHistory) do sumPing += v end
+				local avgFps = #fpsHistory > 0 and math.floor(sumFps / #fpsHistory) or currentFps
+				local avgPing = #pingHistory > 0 and math.floor(sumPing / #pingHistory) or currentPing
 
-			local dFps, dPing, dMem = currentFps - baselineFps, currentPing - baselinePing, currentMem - baselineMem
-			fpsLabel.Text = string.format("FPS: %d (%s%d)", currentFps, dFps >= 0 and "+" or "", dFps)
-			avgFpsLabel.Text = string.format("Avg FPS: %d", avgFps)
-			pingLabel.Text = string.format("Ping: %d ms (%s%d)", currentPing, dPing >= 0 and "+" or "", dPing)
-			avgPingLabel.Text = string.format("Avg Ping: %d ms", avgPing)
-			memoryLabel.Text = string.format("Mem: %d MB (%s%d)", currentMem, dMem >= 0 and "+" or "", dMem)
+				fpsLabel.Text = string.format("FPS: %d", currentFps)
+				avgFpsLabel.Text = string.format("Avg FPS: %d", avgFps)
+				frameTimeLabel.Text = string.format("Frame Time: %.2f ms", lastFrameDelta * 1000)
+				pingLabel.Text = string.format("Ping: %d ms", currentPing)
+				avgPingLabel.Text = string.format("Avg Ping: %d ms", avgPing)
+				memoryLabel.Text = string.format("Mem: %d MB", currentMem)
+				physicsMemLabel.Text = string.format("Physics Mem: %d MB", physMem)
+			end)
 
-			gameNameLabel.Text = "Game: " .. gameName
-			gameIdLabel.Text = "Place ID: " .. tostring(game.PlaceId)
-			playersCountLabel.Text = "Players: " .. tostring(#Players:GetPlayers())
-			serverTimeLabel.Text = "Time: " .. os.date("%H:%M:%S")
+			-- Network
+			pcall(function()
+				local lossItem = Stats:FindFirstChild("Network") and Stats.Network:FindFirstChild("ServerStatsItem") and Stats.Network.ServerStatsItem:FindFirstChild("Data Loss")
+				packetLossLabel.Text = string.format("Packet Loss: %d%%", lossItem and math.floor(lossItem:GetValue()) or 0)
+				networkInLabel.Text = string.format("Data Recv: %d KB/s", math.floor(Stats.DataReceiveKbps or 0))
+				networkOutLabel.Text = string.format("Data Sent: %d KB/s", math.floor(Stats.DataSendKbps or 0))
+			end)
 
-			local elapsed = math.floor(now - sessionStartTime)
-			timeInGameLabel.Text = string.format("Session: %02d:%02d:%02d", math.floor(elapsed / 3600), math.floor((elapsed % 3600) / 60), elapsed % 60)
-			serverLocLabel.Text = "Server Region: " .. serverCountry
+			-- Memory Tags (Individual pcalls to prevent memory tag errors from crashing downstream stats)
+			pcall(function() luaHeapMemLabel.Text = string.format("Lua Heap: %d MB", math.floor(Stats:GetMemoryUsageMbForTag(Enum.DeveloperMemoryTag.Internal) or 0)) end)
+			pcall(function() textureMemLabel.Text = string.format("Texture Mem: %d MB", math.floor(Stats:GetMemoryUsageMbForTag(Enum.DeveloperMemoryTag.Textures) or 0)) end)
+			pcall(function() soundMemLabel.Text = string.format("Audio Mem: %d MB", math.floor(Stats:GetMemoryUsageMbForTag(Enum.DeveloperMemoryTag.Sounds) or 0)) end)
+			pcall(function() guiMemLabel.Text = string.format("GUI Mem: %d MB", math.floor(Stats:GetMemoryUsageMbForTag(Enum.DeveloperMemoryTag.Gui) or 0)) end)
 
-			teamLabel.Text = "Team: " .. (localPlayer and localPlayer.Team and localPlayer.Team.Name or "None")
+			-- Server & Environment
+			pcall(function()
+				gameNameLabel.Text = "Game: " .. gameName
+				gameIdLabel.Text = "Place ID: " .. tostring(game.PlaceId)
+				jobIdLabel.Text = "Job ID: " .. (game.JobId ~= "" and game.JobId:sub(1, 12) .. "..." or "Solo Studio")
+				playersCountLabel.Text = "Players: " .. tostring(#Players:GetPlayers())
+				maxPlayersLabel.Text = "Max Players: " .. tostring(Players.MaxPlayers)
+				serverTimeLabel.Text = "Time: " .. os.date("%H:%M:%S")
 
-			local char = localPlayer and localPlayer.Character
-			local hum = char and char:FindFirstChildOfClass("Humanoid")
+				local elapsed = math.floor(now - sessionStartTime)
+				timeInGameLabel.Text = string.format("Session: %02d:%02d:%02d", math.floor(elapsed / 3600), math.floor((elapsed % 3600) / 60), elapsed % 60)
+				serverLocLabel.Text = "Server Region: " .. serverCountry
+			end)
 
-			if char then
-				local pivot = char:GetPivot().Position
-				posLabel.Text = string.format("Pos: %d, %d, %d", math.round(pivot.X), math.round(pivot.Y), math.round(pivot.Z))
-				if lastPosition then
-					local dt = now - lastPosTime
-					actualSpeedLabel.Text = string.format("Actual Speed: %.1f", dt > 0 and ((pivot - lastPosition).Magnitude / dt) or 0)
-				else
-					actualSpeedLabel.Text = "Actual Speed: 0.0"
+			-- Player Stats
+			pcall(function()
+				teamLabel.Text = "Team: " .. (localPlayer and localPlayer.Team and localPlayer.Team.Name or "None")
+
+				local char = localPlayer and localPlayer.Character
+				local hum = char and char:FindFirstChildOfClass("Humanoid")
+
+				if char then
+					local pivot = char:GetPivot()
+					local pos = pivot.Position
+					local rx, ry, rz = pivot:ToOrientation()
+					posLabel.Text = string.format("Pos: %d, %d, %d", math.round(pos.X), math.round(pos.Y), math.round(pos.Z))
+					rotLabel.Text = string.format("Rot: %d°, %d°, %d°", math.round(math.deg(rx)), math.round(math.deg(ry)), math.round(math.deg(rz)))
+
+					if lastPosition then
+						local dt = now - lastPosTime
+						actualSpeedLabel.Text = string.format("Actual Speed: %.1f", dt > 0 and ((pos - lastPosition).Magnitude / dt) or 0)
+					end
+					lastPosition, lastPosTime = pos, now
+					seatedLabel.Text = "Seated: " .. tostring(hum and hum.Sit or false)
 				end
-				lastPosition, lastPosTime = pivot, now
-				seatedLabel.Text = "Seated: " .. tostring(hum and hum.Sit or false)
-			else
-				posLabel.Text, actualSpeedLabel.Text, seatedLabel.Text = "Pos: N/A", "Actual Speed: N/A", "Seated: N/A"
-				lastPosition = nil
-			end
 
-			if hum and hum.Parent then
-				healthLabel.Text = string.format("HP: %d/%d", math.floor(hum.Health), math.floor(hum.MaxHealth))
-				speedLabel.Text = string.format("WalkSpeed: %.1f", hum.WalkSpeed)
-				jumpLabel.Text = string.format("Jump: %.1f", hum.JumpPower)
-				stateLabel.Text = "State: " .. hum:GetState().Name
-				local tool = char:FindFirstChildWhichIsA("Tool")
-				toolLabel.Text = "Tool: " .. (tool and tool.Name or "None")
-			else
-				healthLabel.Text, speedLabel.Text, jumpLabel.Text, stateLabel.Text, toolLabel.Text = "HP: N/A", "WalkSpeed: N/A", "Jump: N/A", "State: N/A", "Tool: N/A"
-			end
+				if hum then
+					healthLabel.Text = string.format("HP: %d/%d", math.floor(hum.Health), math.floor(hum.MaxHealth))
+					speedLabel.Text = string.format("WalkSpeed: %.1f", hum.WalkSpeed)
+				end
+			end)
 
-			shellRunningLabel.Text = "Running: " .. tostring(_G.ShellRunning or false)
-			shellDevLabel.Text = "Dev: " .. tostring(_G.ShellDev or false)
-			shellThemeLabel.Text = "Theme: " .. tostring(_G.ShellTheme or "Default")
-			shellFuncsLabel.Text = "Functions: " .. tostring(type(_G.ShellFunctions) == "table" and #_G.ShellFunctions or 0)
-			shellBindsLabel.Text = "Keybinds: " .. tostring(type(_G.ShellKeybinds) == "table" and #_G.ShellKeybinds or 0)
+			-- Shell State
+			pcall(function()
+				shellRunningLabel.Text = "Running: " .. tostring(_G.ShellRunning or false)
+				shellDevLabel.Text = "Dev: " .. tostring(_G.ShellDev or false)
+				shellThemeLabel.Text = "Theme: " .. tostring(_G.ShellTheme or "Default")
+			end)
 		end
-		task.wait(0.25)
+		task.wait(SETTINGS.DevStatsFrequency or 0.25)
 	end
 end)
 
-local devConsoleEnabled = false
-devCheckboxButton.MouseButton1Click:Connect(function()
-	if not _G.ShellDev then return end
-	devConsoleEnabled = not devConsoleEnabled
-	devCheckboxButton.Text = devConsoleEnabled and "[X] Enable Developer Console" or "[ ] Enable Developer Console"
-	consoleFrame.Visible = not devConsoleEnabled
-	devConsoleContainer.Visible = devConsoleEnabled
+-- ---------------------------------------------------------
+-- TAB 5: DEV CONSOLE
+-- ---------------------------------------------------------
+local devConsoleFrame = buildScrollingConsole("DevConsoleFrame", devConsolePage)
+devConsoleFrame.Size = UDim2.new(1, 0, 1, 0)
+
+-- ---------------------------------------------------------
+-- TAB 6: SETTINGS
+-- ---------------------------------------------------------
+local settingsScroll = buildScrollingConsole("SettingsScroll", settingsPage)
+settingsScroll.Size = UDim2.new(1, 0, 1, 0)
+
+local function createSettingToggle(titleText, defaultState, isDisabled, callback)
+	local row = createUIElement("Frame", {
+		Size = UDim2.new(1, -10, 0, 32),
+		BackgroundColor3 = Color3.fromRGB(30, 30, 36),
+		BorderSizePixel = 0, Parent = settingsScroll
+	})
+	applyCorners(row)
+
+	createUIElement("TextLabel", {
+		Size = UDim2.new(1, -60, 1, 0), Position = UDim2.new(0, 10, 0, 0),
+		BackgroundTransparency = 1, Text = titleText .. (isDisabled and " (Locked)" or ""),
+		TextColor3 = isDisabled and Color3.fromRGB(130, 130, 130) or toColor3(THEME.Text),
+		Font = Enum.Font.Gotham, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left, Parent = row
+	})
+
+	local toggleBtn = createUIElement("TextButton", {
+		Size = UDim2.new(0, 40, 0, 20), Position = UDim2.new(1, -50, 0.5, -10),
+		BackgroundColor3 = isDisabled and Color3.fromRGB(40, 40, 40) or (defaultState and toColor3(THEME.Accent) or Color3.fromRGB(50, 50, 60)),
+		Text = defaultState and "ON" or "OFF", TextColor3 = isDisabled and Color3.fromRGB(150, 150, 150) or Color3.fromRGB(255, 255, 255),
+		Font = Enum.Font.GothamBold, TextSize = 10, Parent = row
+	})
+	applyCorners(toggleBtn, UDim.new(0, 10))
+
+	local state = defaultState
+	if not isDisabled then
+		toggleBtn.MouseButton1Click:Connect(function()
+			state = not state
+			toggleBtn.Text = state and "ON" or "OFF"
+			toggleBtn.BackgroundColor3 = state and toColor3(THEME.Accent) or Color3.fromRGB(50, 50, 60)
+			callback(state)
+		end)
+	end
+end
+
+createStatLabel("-- GENERAL SETTINGS --", settingsScroll, true)
+createSettingToggle("Enable Dev Mode", _G.ShellDev or false, false, function(enabled)
+	_G.ShellDev = enabled
+	updateTabVisibilities()
 end)
 
--- Dynamic Window Edge Resizing
+createSettingToggle("Auto-Scroll Console", SETTINGS.AutoScroll, false, function(enabled) SETTINGS.AutoScroll = enabled end)
+createSettingToggle("Show Console Timestamps", SETTINGS.ShowTimestamps, false, function(enabled) SETTINGS.ShowTimestamps = enabled end)
+createSettingToggle("Enable Audio Effects", SETTINGS.SoundEnabled, false, function(enabled) SETTINGS.SoundEnabled = enabled end)
+
+createDivider(settingsScroll)
+createStatLabel("-- TAB VISIBILITY MENU --", settingsScroll, true)
+
+createSettingToggle("Console Tab", true, true, function() end)
+createSettingToggle("Scripts Tab", TAB_VISIBILITY_SETTINGS.Scripts, false, function(enabled)
+	TAB_VISIBILITY_SETTINGS.Scripts = enabled
+	updateTabVisibilities()
+end)
+createSettingToggle("Waypoints Tab", TAB_VISIBILITY_SETTINGS.Waypoints, false, function(enabled)
+	TAB_VISIBILITY_SETTINGS.Waypoints = enabled
+	updateTabVisibilities()
+end)
+createSettingToggle("Settings Tab", true, true, function() end)
+
+switchTab("Console")
+
+-- Dynamic Edge Resizing
 local function setupEdgeResizing(targetFrame, minSize)
-	minSize = minSize or Vector2.new(300, 150)
+	minSize = minSize or Vector2.new(380, 220)
 	local THICK = 6
 	local resizing, activeDir, startFrameSize, startFramePos, startMousePos
 
@@ -541,10 +1217,6 @@ local function setupEdgeResizing(targetFrame, minSize)
 		Right = {Size = UDim2.new(0, THICK, 1, -THICK*2), Pos = UDim2.new(1, -THICK/2, 0, THICK)},
 		Top = {Size = UDim2.new(1, -THICK*2, 0, THICK), Pos = UDim2.new(0, THICK, 0, -THICK/2)},
 		Bottom = {Size = UDim2.new(1, -THICK*2, 0, THICK), Pos = UDim2.new(0, THICK, 1, -THICK/2)},
-		TopLeft = {Size = UDim2.new(0, THICK*2, 0, THICK*2), Pos = UDim2.new(0, -THICK/2, 0, -THICK/2)},
-		TopRight = {Size = UDim2.new(0, THICK*2, 0, THICK*2), Pos = UDim2.new(1, -THICK*1.5, 0, -THICK/2)},
-		BottomLeft = {Size = UDim2.new(0, THICK*2, 0, THICK*2), Pos = UDim2.new(0, -THICK/2, 1, -THICK*1.5)},
-		BottomRight = {Size = UDim2.new(0, THICK*2, 0, THICK*2), Pos = UDim2.new(1, -THICK*1.5, 1, -THICK*1.5)},
 	}
 
 	local handleFolder = targetFrame:FindFirstChild("ResizeHandles") or Instance.new("Folder", targetFrame)
@@ -594,7 +1266,7 @@ local function setupEdgeResizing(targetFrame, minSize)
 	end)
 end
 
-setupEdgeResizing(mainFrame, Vector2.new(350, 200))
+setupEdgeResizing(mainFrame)
 
 -- =========================================================
 -- Logging System
@@ -614,12 +1286,13 @@ local function shellLog(text, logTypeOrColor)
 	local saveText = cleanStr(text)
 	saveLog(saveText)
 
-	local logColor, isDev = THEME.Console_Info, false
+	local logColor, isDev, logCategory = THEME.Console_Info, false, "info"
 	if typeof(logTypeOrColor) == "Color3" then
 		logColor = logTypeOrColor
 	elseif type(logTypeOrColor) == "string" then
 		local lType = logTypeOrColor:lower()
 		isDev = (lType == "developer")
+		logCategory = (lType:find("warn") and "warn") or (lType:find("error") and "error") or "info"
 		logColor = isDev and THEME.Accent or ({
 			error = THEME.Console_Error,
 			warn = THEME.Console_Warn, warning = THEME.Console_Warn,
@@ -628,15 +1301,22 @@ local function shellLog(text, logTypeOrColor)
 	end
 
 	local targetConsole = isDev and devConsoleFrame or consoleFrame
+	local logText = SETTINGS.ShowTimestamps and string.format("[%s] %s", os.date("%H:%M:%S"), tostring(text)) or tostring(text)
+
 	local logEntry = createUIElement("TextBox", {
 		Name = "LogEntry", BackgroundTransparency = 1, Size = UDim2.new(1, -10, 0, 0),
-		AutomaticSize = Enum.AutomaticSize.Y, Text = string.format("[%s] %s", os.date("%H:%M:%S"), tostring(text)),
+		AutomaticSize = Enum.AutomaticSize.Y, Text = logText,
 		TextColor3 = toColor3(logColor, THEME.Text), Font = THEME.ConsoleFont or Enum.Font.Code,
 		TextSize = THEME.ConsoleFontSize or 14, TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left,
 		TextEditable = false, ClearTextOnFocus = false, Parent = targetConsole
 	})
+	logEntry:SetAttribute("LogType", logCategory)
 
-	task.defer(function() targetConsole.CanvasPosition = Vector2.new(0, 100000) end)
+	applyConsoleFilters()
+
+	if SETTINGS.AutoScroll then
+		task.defer(function() targetConsole.CanvasPosition = Vector2.new(0, 100000) end)
+	end
 end
 
 _G.ShellLog = shellLog
@@ -645,169 +1325,22 @@ local function devlog(msg) if _G.ShellLog then _G.ShellLog("[Dev]: " .. msg, "de
 shellLog("Shell UI Framework Loaded.", THEME.Accent)
 shellLog("Press F2 or ' to toggle/focus visibility.", THEME.Placeholder)
 
--- Command Bar Framework
-local commandBarContainer = createUIElement("Frame", {
-	Name = "CommandBarContainer", Size = UDim2.new(1, 0, 0, 30),
-	LayoutOrder = 2, BackgroundColor3 = Color3.fromRGB(30, 30, 30), BorderSizePixel = 0, Parent = container
-})
-applyCorners(commandBarContainer)
-
-local commandBar = createUIElement("TextBox", {
-	Name = "CommandBar", Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1,
-	TextColor3 = toColor3(THEME.Text), PlaceholderColor3 = toColor3(THEME.Placeholder),
-	PlaceholderText = "Type a command...", Font = THEME.CommandFont or Enum.Font.Code,
-	TextSize = THEME.CommandFontSize or 14, TextXAlignment = Enum.TextXAlignment.Left,
-	Text = "", ClearTextOnFocus = false, Parent = commandBarContainer
-})
-applyPadding(commandBar, 2, 2, 8, 8)
-
-local suggestionFrame = createUIElement("Frame", {
-	Name = "SuggestionFrame", Size = UDim2.new(0, 300, 0, 150), Position = UDim2.new(0, 0, 0, -155),
-	BackgroundColor3 = toColor3(THEME.Background), Visible = false, ZIndex = 10, Parent = commandBarContainer
-})
-applyCorners(suggestionFrame)
-local suggStroke = createUIElement("UIStroke", { Color = toColor3(THEME.Border), Parent = suggestionFrame })
-
-local suggestionList = buildScrollingConsole("SuggestionList", suggestionFrame)
-suggestionList.ScrollBarThickness = 2
-
--- Command State Variables
-local commands, matches, matchIndex, isMinimized, lastCommand = {}, {}, 1, false, ""
+local isMinimized, lastCommand = false, ""
 
 _G.ShellUIUpdate = function(newCommands)
-	commands = newCommands
+	commands = newCommands or {}
 	local count = 0; for _ in pairs(commands) do count += 1 end
 	shellLog("Command map synchronized. (" .. count .. " entries)", THEME.Accent)
 end
 
-local function scrollToMatch(index)
-	local itemHeight = (THEME.SuggestionFontSize or 14) + 5
-	local targetYMin = (index - 1) * itemHeight
-	local targetYMax = targetYMin + itemHeight
-	local currentY, visibleH = suggestionList.CanvasPosition.Y, suggestionList.AbsoluteWindowSize.Y
-
-	if targetYMin < currentY then suggestionList.CanvasPosition = Vector2.new(0, targetYMin)
-	elseif targetYMax > (currentY + visibleH) then suggestionList.CanvasPosition = Vector2.new(0, targetYMax - visibleH) end
-end
-
-local function updateSelectionVisual()
-	local idx = 1
-	for _, child in ipairs(suggestionList:GetChildren()) do
-		if child:IsA("TextButton") then
-			child.TextColor3 = toColor3((idx == matchIndex) and THEME.Accent or THEME.SuggestionTextColor, THEME.Text)
-			idx += 1
-		end
-	end
-	scrollToMatch(matchIndex)
-end
-
-local function applySuggestion(value)
-	commandBar.Text = value
-	task.defer(function()
-		commandBar.CursorPosition = #value + 1
-		commandBar:CaptureFocus()
-	end)
-	suggestionFrame.Visible = false
-end
-
-local function updateSuggestions()
-	local fullText = commandBar.Text
-	matches, matchIndex = {}, 1
-
-	for _, child in ipairs(suggestionList:GetChildren()) do
-		if child:IsA("TextButton") then child:Destroy() end
-	end
-
-	if fullText == "" then suggestionFrame.Visible = false; return end
-
-	local parts = string.split(fullText, " ")
-	local cmdInput = parts[1]:lower()
-
-	if #parts <= 1 then
-		for name, cmd in pairs(commands) do
-			if name:sub(1, #cmdInput) == cmdInput and cmd.Category ~= "Hidden" then
-				table.insert(matches, { Name = cmd.Name, Display = string.format("%s (%s)", cmd.Name, table.concat(cmd.Arguments or {}, ", ")), Value = cmd.Name .. " " })
-			end
-		end
-		table.sort(matches, function(a, b) return a.Name < b.Name end)
-	else
-		local activeCmd = commands[cmdInput]
-		if activeCmd and activeCmd.Arguments then
-			local firstArg, argInput = activeCmd.Arguments[1], parts[2]:lower()
-			
-			if firstArg == "Player" then
-				for _, p in ipairs(Players:GetPlayers()) do
-					if p.Name:lower():sub(1, #argInput) == argInput then
-						table.insert(matches, { Name = p.Name, Display = p.Name, Value = cmdInput .. " " .. p.Name })
-					end
-				end
-			elseif firstArg == "Theme" or firstArg == "ThemeName" then
-				for _, themeName in ipairs(getAvailableThemes()) do
-					if themeName:lower():sub(1, #argInput) == argInput then
-						table.insert(matches, { Name = themeName, Display = themeName, Value = cmdInput .. " " .. themeName })
-					end
-				end
-			elseif (firstArg == "FilePath" or firstArg == "File" or firstArg == "Path") and typeof(listfiles) == "function" then
-				local function getAllDescendants(dir)
-					local results = {}
-					local ok, files = pcall(listfiles, dir)
-					if ok and files then
-						for _, rawPath in ipairs(files) do
-							local norm = rawPath:gsub("\\", "/")
-							table.insert(results, norm)
-							if typeof(isfolder) == "function" and pcall(isfolder, rawPath) then
-								for _, sub in ipairs(getAllDescendants(norm)) do table.insert(results, sub) end
-							end
-						end
-					end
-					return results
-				end
-				for _, fullPath in ipairs(getAllDescendants("Shell")) do
-					local relative = fullPath:gsub("^Shell/", ""):gsub("^Shell", "")
-					if relative ~= "" and relative:lower():sub(1, #argInput) == argInput then
-						table.insert(matches, { Name = relative, Display = relative, Value = cmdInput .. " " .. relative })
-					end
-				end
-			end
-			table.sort(matches, function(a, b) return a.Name < b.Name end)
-		end
-	end
-
-	if #matches == 0 then
-		suggestionFrame.Visible = false
-	else
-		suggestionFrame.Visible = true
-		local fontSize = THEME.SuggestionFontSize or 14
-		local itemHeight = fontSize + 4
-		local frameHeight = (math.min(#matches, 5) * itemHeight) + 10
-
-		suggestionFrame.Size = UDim2.new(0, 300, 0, frameHeight)
-		suggestionFrame.Position = UDim2.new(0, 0, 0, -frameHeight - 5)
-
-		for i, match in ipairs(matches) do
-			local sugButton = createUIElement("TextButton", {
-				Name = "Sug_" .. match.Name, Size = UDim2.new(1, -5, 0, itemHeight), BackgroundTransparency = 1,
-				Text = "  " .. match.Display, TextColor3 = toColor3((i == 1) and THEME.Accent or THEME.SuggestionTextColor, THEME.Text),
-				Font = THEME.CommandFont or Enum.Font.Code, TextSize = fontSize, TextXAlignment = Enum.TextXAlignment.Left,
-				Parent = suggestionList
-			})
-			sugButton.MouseButton1Click:Connect(function() applySuggestion(match.Value) end)
-		end
-	end
-end
-
--- Interactivity & Keybind Animations
 local tweenInfo = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
 minButton.MouseButton1Click:Connect(function()
 	isMinimized = not isMinimized
-	local handleFolder = mainFrame:FindFirstChild("ResizeHandles")
 	minButton.Text = isMinimized and "+" or "-"
-	if handleFolder then handleFolder.Parent = isMinimized and nil or mainFrame end
-	if isMinimized then suggestionFrame.Visible = false end
-
-	TweenService:Create(mainFrame, tweenInfo, { Size = UDim2.new(0, mainFrame.AbsoluteSize.X, 0, isMinimized and 75 or THEME.FrameSize.Y) }):Play()
-	TweenService:Create(consoleWrapper, tweenInfo, { Size = UDim2.new(1, 0, 0, isMinimized and 0 or -35) }):Play()
+	TweenService:Create(mainFrame, tweenInfo, { Size = UDim2.new(0, mainFrame.AbsoluteSize.X, 0, isMinimized and 32 or THEME.FrameSize.Y) }):Play()
+	tabBar.Visible = not isMinimized
+	container.Visible = not isMinimized
 end)
 
 local dragging, dragInput, dragStart, startPos
@@ -832,100 +1365,21 @@ end)
 UserInputService.InputBegan:Connect(function(input, processed)
 	if input.KeyCode == Enum.KeyCode.F2 then
 		mainFrame.Visible = not mainFrame.Visible
-		if mainFrame.Visible then commandBar:CaptureFocus() else commandBar:ReleaseFocus() suggestionFrame.Visible = false end
+		if mainFrame.Visible and activeTabName == "Console" then commandBar:CaptureFocus() else commandBar:ReleaseFocus() suggestionFrame.Visible = false end
 	elseif input.KeyCode == Enum.KeyCode.Quote and not processed then
 		mainFrame.Visible = true
+		switchTab("Console")
 		task.defer(function() commandBar.Text = ""; commandBar:CaptureFocus() end)
 	end
 end)
 
-local previousTextLen = 0
 commandBar:GetPropertyChangedSignal("Text"):Connect(function()
 	commandBar.Text = commandBar.Text:gsub("\t", ""):gsub("'", "")
 	updateSuggestions()
-	local currentLen = #commandBar.Text
-	if currentLen > previousTextLen then playThemeAudio(typingSoundObj, THEME.TypingSound) end
-	previousTextLen = currentLen
 end)
-
-UserInputService.InputBegan:Connect(function(input)
-	if not commandBar:IsFocused() then return end
-	if input.KeyCode == Enum.KeyCode.Tab then
-		if suggestionFrame.Visible and #matches > 0 and matches[matchIndex] then applySuggestion(matches[matchIndex].Value) end
-	elseif suggestionFrame.Visible then
-		if input.KeyCode == Enum.KeyCode.Up and #matches > 1 then
-			matchIndex = (matchIndex - 2) % #matches + 1
-			updateSelectionVisual()
-		elseif input.KeyCode == Enum.KeyCode.Down and #matches > 1 then
-			matchIndex = matchIndex % #matches + 1
-			updateSelectionVisual()
-		end
-	else
-		if input.KeyCode == Enum.KeyCode.Up and commandBar.Text == "" and lastCommand ~= "" then applySuggestion(lastCommand)
-		elseif input.KeyCode == Enum.KeyCode.Down and commandBar.Text == lastCommand and lastCommand ~= "" then commandBar.Text = "" end
-	end
-end)
-
-_G.ShellTheme = _G.ShellTheme or "default"
-
-local function applyThemeToUI()
-	mainFrame.BackgroundColor3, mainFrame.Size = toColor3(THEME.Background), UDim2.new(0, THEME.FrameSize.X, 0, THEME.FrameSize.Y)
-	mainStroke.Color = toColor3(THEME.Border)
-	titleBar.BackgroundColor3 = toColor3(THEME.Border)
-	titleText.Text = (THEME.CustomTitle and THEME.CustomTitle ~= "") and THEME.CustomTitle or "Shell Console"
-	titleText.TextColor3, minButton.TextColor3 = toColor3(THEME.Text), toColor3(THEME.Text)
-
-	local bg = toColor3(THEME.Background)
-	commandBarContainer.BackgroundColor3 = Color3.fromRGB(math.clamp(math.floor(bg.R * 255) + 5, 0, 255), math.clamp(math.floor(bg.G * 255) + 5, 0, 255), math.clamp(math.floor(bg.B * 255) + 5, 0, 255))
-	commandBar.TextColor3, commandBar.PlaceholderColor3 = toColor3(THEME.Text), toColor3(THEME.Placeholder)
-	commandBar.Font, commandBar.TextSize = THEME.CommandFont or Enum.Font.Code, THEME.CommandFontSize or 14
-
-	suggestionFrame.BackgroundColor3, suggStroke.Color = toColor3(THEME.Background), toColor3(THEME.Border)
-
-	if THEME.BackgroundImage and THEME.BackgroundImage ~= "" then
-		consoleBgImage.Image = formatImageAsset(THEME.BackgroundImage)
-		consoleBgImage.ImageTransparency = THEME.BackgroundImageTransparency or 0
-		consoleBgImage.ScaleType = THEME.BackgroundImageScaleType or Enum.ScaleType.Stretch
-		if typeof(THEME.BackgroundImageTileSize) == "UDim2" then consoleBgImage.TileSize = THEME.BackgroundImageTileSize end
-		consoleBgImage.Visible = true
-	else consoleBgImage.Visible = false end
-
-	for _, obj in ipairs({mainFrame, titleBar, commandBarContainer, suggestionFrame}) do applyCorners(obj) end
-	for _, target in ipairs({consoleFrame, devConsoleFrame}) do
-		for _, logEntry in ipairs(target:GetChildren()) do
-			if logEntry:IsA("TextBox") then
-				logEntry.Font, logEntry.TextSize = THEME.ConsoleFont or Enum.Font.Code, THEME.ConsoleFontSize or 14
-			end
-		end
-	end
-end
-
-applyThemeToUI()
-
-_G.SelectTheme = function(themeName)
-	local filePath = string.format("Shell/Assets/Themes/%s.csv", tostring(themeName))
-	if isfile and not isfile(filePath) then
-		shellLog("Theme file not found: " .. filePath, THEME.Console_Error)
-		return false
-	end
-
-	local success, err = pcall(function() loadThemeFromCSV(filePath) end)
-	if success then
-		_G.ShellTheme = themeName
-		applyThemeToUI()
-		if writefile and readfile and isfile and isfile(filePath) then
-			pcall(function() writefile(DEFAULT_THEME_PATH, readfile(filePath)) end)
-		end
-		shellLog("Successfully loaded theme: " .. themeName, THEME.Accent)
-		return true
-	else
-		shellLog("Failed to load theme '" .. themeName .. "': " .. tostring(err), THEME.Console_Error)
-		return false
-	end
-end
 
 _G.ShellClearConsole = function()
-	local targetConsole = devConsoleEnabled and devConsoleFrame or consoleFrame
+	local targetConsole = (activeTabName == "Dev Console") and devConsoleFrame or consoleFrame
 	for _, child in ipairs(targetConsole:GetChildren()) do
 		if child:IsA("TextBox") then child:Destroy() end
 	end
