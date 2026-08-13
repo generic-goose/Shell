@@ -175,6 +175,22 @@ Functions["dex"] = {
     end
 }
 
+Functions["vex"] = {
+    Name = "vex",
+    Arguments = {},
+    Category = "Developer",
+    Function = function()
+        logFunc("Loading Vex...", "default")
+        local success, err = pcall(function()
+            loadstring(game:HttpGet("https://raw.githubusercontent.com/Vezise/2026/main/Vez/VexExplorer/VEXExplorer.lua"))()       
+        end)
+        
+        if not success then
+            logFunc("Failed to load Dex: " .. tostring(err), "error")
+        end
+    end
+}
+
 Functions["cobalt"] = {
     Name = "cobalt",
     Arguments = {},
