@@ -4,6 +4,19 @@ _G.ShellRunning = true
 _G.ShellDev = false
 _G.ShellTheme = _G.ShellTheme or "default"
 _G.ShellKeybinds = _G.ShellKeybinds or {}
+_G.ShellSettings = {
+    Core = {
+        AutoScroll = true,
+        Timestamps = true,
+        Audio = true,
+        ScriptTabVis = true,
+        WaypointTabVis = true,
+        ConsoleTabVis = true,
+        SettingsTabVis = true,
+    },
+    Scripts = {
+    }
+}
 
 local UserInputService = game:GetService("UserInputService")
 local StarterGui = game:GetService("StarterGui")
@@ -13,6 +26,8 @@ local BASE_URL = "https://raw.githubusercontent.com/generic-goose/Shell/refs/hea
 local compilerPath = BASE_URL .. "Core/compiler.lua"
 local funcPath = BASE_URL .. "Core/functions.lua"
 local uiPath = BASE_URL .. "Core/ui.lua"
+
+local CONFIG_PATH = "Shell/Core/config.json"
 
 local function fetchRemote(url)
     local ok, res = pcall(function()
@@ -73,6 +88,64 @@ local function parseCommandString(str)
     return table.remove(args, 1), args
 end
 
+-- Config Management Functions for config.json
+local function loadConfig()
+    if not checkFile(CONFIG_PATH) then
+        return { imported = {}, autoexec = {} }
+    end
+    local success, content = pcall(readfile, CONFIG_PATH)
+    if not success or not content then
+        return { imported = {}, autoexec = {} }
+    end
+    local decodeSuccess, decoded = pcall(function()
+        return HttpService:JSONDecode(content)
+    end)
+    if decodeSuccess and type(decoded) == "table" then
+        decoded.imported = decoded.imported or {}
+        decoded.autoexec = decoded.autoexec or {}
+        return decoded
+    end
+    return { imported = {}, autoexec = {} }
+end
+
+local function saveConfig(configTable)
+    if not writefile then return end
+    local encodeSuccess, encoded = pcall(function()
+        return HttpService:JSONEncode(configTable)
+    end)
+    if encodeSuccess then
+        writefile(CONFIG_PATH, encoded)
+    end
+end
+
+local function getLinesFromConfig(key)
+    local config = loadConfig()
+    return config[key] or {}
+end
+
+local function toggleConfigEntry(key, value, tag)
+    local config = loadConfig()
+    config[key] = config[key] or {}
+    
+    local foundIdx
+    for i, line in ipairs(config[key]) do
+        if line == value then
+            foundIdx = i
+            break
+        end
+    end
+
+    if foundIdx then
+        table.remove(config[key], foundIdx)
+        log("Removed '" .. value .. "' from " .. tag .. ".")
+    else
+        table.insert(config[key], value)
+        log("Added '" .. value .. "' to " .. tag .. ".")
+    end
+
+    saveConfig(config)
+end
+
 -- Non-blocking core module loader
 local function loadCoreModule(localPath, remoteUrl, chunkName)
     local localExists = checkFile(localPath)
@@ -81,7 +154,6 @@ local function loadCoreModule(localPath, remoteUrl, chunkName)
     if localContent then
         log("Loading local module: " .. localPath)
 
-        -- Defer the web check to a background thread so execution is not blocked
         task.spawn(function()
             local remoteContent = fetchRemote(remoteUrl)
             if remoteContent then
@@ -96,7 +168,6 @@ local function loadCoreModule(localPath, remoteUrl, chunkName)
 
         return safeLoadString(localContent, chunkName)
     else
-        -- Fallback: If no local file exists, fetch from remote directly without saving to disk
         log("Local module missing. Fetching remote in-memory: " .. remoteUrl)
         local remoteContent = fetchRemote(remoteUrl)
         if remoteContent then
@@ -164,46 +235,9 @@ local function loadShellAssets()
     end
 
     if writefile then
-        if not checkFile("Shell/Core/imported.csv") then
-            local importedData = fetchRemote(BASE_URL .. "Core/imported.csv")
-            writefile("Shell/Core/imported.csv", importedData or "")
+        if not checkFile(CONFIG_PATH) then
+            saveConfig({ imported = {}, autoexec = {} })
         end
-        if not checkFile("Shell/Core/autoexec.csv") then
-            writefile("Shell/Core/autoexec.csv", "")
-        end
-    end
-end
-
-local function getLines(path)
-    if not isfile or not checkFile(path) then return {} end
-    local lines = {}
-    for line in readfile(path):gmatch("[^\r\n]+") do
-        local clean = line:match("^%s*(.-)%s*$")
-        if clean ~= "" then table.insert(lines, clean) end
-    end
-    return lines
-end
-
-local function toggleCsvLine(path, value, tag)
-    local lines = getLines(path)
-    local foundIdx
-    for i, line in ipairs(lines) do
-        if line == value then
-            foundIdx = i
-            break
-        end
-    end
-
-    if foundIdx then
-        table.remove(lines, foundIdx)
-        log("Removed '" .. value .. "' from " .. tag .. ".")
-    else
-        table.insert(lines, value)
-        log("Added '" .. value .. "' to " .. tag .. ".")
-    end
-
-    if writefile then
-        writefile(path, table.concat(lines, "\n"))
     end
 end
 
@@ -305,84 +339,78 @@ function compiler.Refresh()
         end
     }
 
-cmds["help"] = {
-    Name = "help", Arguments = {"Category or Command (Optional)"}, Category = "Core", Desc = "Displays helpful information on commands and categories.",
-    Function = function(query)
-        log("=================== [ SHELL COMMANDS ] ===================")
-        
-        -- Support direct lookup for a single command
-        if query and query ~= "" then
-            local targetCmd = cmds[query:lower()]
-            if targetCmd and targetCmd.Category ~= "Hidden" then
-                local argsText = ""
-                if targetCmd.Arguments and #targetCmd.Arguments > 0 then
-                    argsText = " <" .. table.concat(targetCmd.Arguments, "> <") .. ">"
+    cmds["help"] = {
+        Name = "help", Arguments = {"Category or Command (Optional)"}, Category = "Core", Desc = "Displays helpful information on commands and categories.",
+        Function = function(query)
+            log("=================== [ SHELL COMMANDS ] ===================")
+            
+            if query and query ~= "" then
+                local targetCmd = cmds[query:lower()]
+                if targetCmd and targetCmd.Category ~= "Hidden" then
+                    local argsText = ""
+                    if targetCmd.Arguments and #targetCmd.Arguments > 0 then
+                        argsText = " <" .. table.concat(targetCmd.Arguments, "> <") .. ">"
+                    end
+                    
+                    local description = targetCmd.Description or targetCmd.Desc or "No description provided."
+
+                    log("Command: " .. targetCmd.Name .. argsText)
+                    log("Category: " .. (targetCmd.Category or "Uncategorized"))
+                    log("Description: " .. description)
+                    log("==========================================================")
+                    return
+                end
+            end
+
+            local categories = {}
+            for _, cmd in pairs(cmds) do
+                if cmd.Category ~= "Hidden" then
+                    local cat = cmd.Category or "Uncategorized"
+                    categories[cat] = categories[cat] or {}
+                    table.insert(categories[cat], cmd)
+                end
+            end
+
+            if query and query ~= "" then
+                local filtered = {}
+                for catName, cmdList in pairs(categories) do
+                    if catName:lower() == query:lower() then
+                        filtered[catName] = cmdList
+                    end
                 end
                 
-                -- Resolve description from either Description or Desc key
-                local description = targetCmd.Description or targetCmd.Desc or "No description provided."
-
-                log("Command: " .. targetCmd.Name .. argsText)
-                log("Category: " .. (targetCmd.Category or "Uncategorized"))
-                log("Description: " .. description)
-                log("==========================================================")
-                return
+                if next(filtered) == nil then
+                    logError("No command or category matching '" .. query .. "' found.")
+                    log("==========================================================")
+                    return
+                end
+                categories = filtered
             end
-        end
 
-        -- Group non-hidden commands by Category
-        local categories = {}
-        for _, cmd in pairs(cmds) do
-            if cmd.Category ~= "Hidden" then
-                local cat = cmd.Category or "Uncategorized"
-                categories[cat] = categories[cat] or {}
-                table.insert(categories[cat], cmd)
-            end
-        end
+            local sortedCatNames = {}
+            for catName in pairs(categories) do table.insert(sortedCatNames, catName) end
+            table.sort(sortedCatNames)
 
-        -- Filter by specified category if provided
-        if query and query ~= "" then
-            local filtered = {}
-            for catName, cmdList in pairs(categories) do
-                if catName:lower() == query:lower() then
-                    filtered[catName] = cmdList
+            for _, catName in ipairs(sortedCatNames) do
+                local cmdList = categories[catName]
+                table.sort(cmdList, function(a, b) return a.Name < b.Name end)
+
+                log("[" .. catName:upper() .. "] (" .. #cmdList .. ")")
+                
+                for _, cmd in ipairs(cmdList) do
+                    local argsText = ""
+                    if cmd.Arguments and #cmd.Arguments > 0 then
+                        argsText = " <" .. table.concat(cmd.Arguments, "> <") .. ">"
+                    end
+                    log(string.format("  • %s%s", cmd.Name, argsText))
                 end
             end
-            
-            if next(filtered) == nil then
-                logError("No command or category matching '" .. query .. "' found.")
-                log("==========================================================")
-                return
-            end
-            categories = filtered
+
+            log("==========================================================")
+            log("Tip: Use 'help <Category/Command>' to search.")
+            log("Discord: https://discord.gg/jBW96MNauQ")
         end
-
-        -- Sort category names
-        local sortedCatNames = {}
-        for catName in pairs(categories) do table.insert(sortedCatNames, catName) end
-        table.sort(sortedCatNames)
-
-        -- Compact Display: Print category headers and inline command list
-        for _, catName in ipairs(sortedCatNames) do
-            local cmdList = categories[catName]
-            table.sort(cmdList, function(a, b) return a.Name < b.Name end)
-
-            log("[" .. catName:upper() .. "] (" .. #cmdList .. ")")
-            
-            for _, cmd in ipairs(cmdList) do
-                local argsText = ""
-                if cmd.Arguments and #cmd.Arguments > 0 then
-                    argsText = " <" .. table.concat(cmd.Arguments, "> <") .. ">"
-                end
-                log(string.format("  • %s%s", cmd.Name, argsText))
-            end
-        end
-
-        log("==========================================================")
-        log("Tip: Use 'help <Category/Command>' to search.")
-        log("Discord: https://discord.gg/jBW96MNauQ")
-    end
-}
+    }
 
     cmds["refresh"] = { Name = "refresh", Arguments = {}, Category = "Core", Function = compiler.Refresh }
 
@@ -403,7 +431,7 @@ cmds["help"] = {
         Function = function(...)
             local args = {...}
             if #args == 0 then return logError("autoexec requires a command line string as an argument.") end
-            toggleCsvLine("Shell/Core/autoexec.csv", table.concat(args, " "):match("^%s*(.-)%s*$"), "autoexec sequence")
+            toggleConfigEntry("autoexec", table.concat(args, " "):match("^%s*(.-)%s*$"), "autoexec sequence")
         end
     }
 
@@ -412,7 +440,17 @@ cmds["help"] = {
         Function = function(...)
             local args = {...}
             if #args == 0 then return logError("import requires a URL link as an argument.") end
-            toggleCsvLine("Shell/Core/imported.csv", table.concat(args, " "):match("^%s*(.-)%s*$"), "imported.csv")
+            toggleConfigEntry("imported", table.concat(args, " "):match("^%s*(.-)%s*$"), "config.json (imported)")
+        end
+    }
+
+    cmds["importlist"] = {
+        Name = "importlist", Arguments = {}, Category = "Core",
+        Function = function()
+            log("--- Imported Commands List ---")
+            for _, cmd in ipairs(getLinesFromConfig("imported")) do log("- " .. cmd) end
+            log("------------------------------")
+            log("This list is extensive to all currently loaded imported command modules.")
         end
     }
 
@@ -420,7 +458,7 @@ cmds["help"] = {
         Name = "autoexeclist", Arguments = {}, Category = "Core",
         Function = function()
             log("--- Autoexec List ---")
-            for _, cmd in ipairs(getLines("Shell/Core/autoexec.csv")) do log("- " .. cmd) end
+            for _, cmd in ipairs(getLinesFromConfig("autoexec")) do log("- " .. cmd) end
             log("---------------------")
             log("This list is extensive to all currently loaded auto executions.")
         end
@@ -461,6 +499,15 @@ cmds["help"] = {
         end
     }
 
+    cmds["reloadui"] = {
+        Name = "reloadui", Arguments = {}, Category = "Core",
+        Function = function()
+            local ok, err = loadCoreModule("Shell/Core/ui.lua", uiPath, "ui.lua")
+            if not ok then logError("Failed to load ui.lua: " .. tostring(err)) end
+            if _G.ShellUIUpdate then _G.ShellUIUpdate(compiler.Functions) end
+        end
+    }
+
     _G.ShellFunctions = compiler.Functions
     if _G.ShellUIUpdate then pcall(_G.ShellUIUpdate, compiler.Functions) end
     log("Environment compiled successfully.")
@@ -474,7 +521,7 @@ if not ok then logError("Failed to load ui.lua: " .. tostring(err)) end
 
 if _G.ShellUIUpdate then _G.ShellUIUpdate(compiler.Functions) end
 
-local autoexecLines = getLines("Shell/Core/autoexec.csv")
+local autoexecLines = getLinesFromConfig("autoexec")
 if #autoexecLines > 0 then
     log("Running autoexec routine...")
     for _, line in ipairs(autoexecLines) do
