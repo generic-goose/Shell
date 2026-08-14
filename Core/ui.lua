@@ -288,7 +288,7 @@ local typingSoundObj = createUIElement("Sound", { Name = "TypingAudio", Volume =
 local enterSoundObj = createUIElement("Sound", { Name = "EnterAudio", Volume = 0.5, Parent = screenGui })
 
 local function playThemeAudio(soundObj, assetId)
-	if SETTINGS.SoundEnabled and assetId and assetId ~= "" then
+	if _G.ShellSettings.Core.Audio and assetId and assetId ~= "" then
 		local formatted = assetId:match("^rbxassetid://") and assetId or ("rbxassetid://" .. assetId)
 		if soundObj.SoundId ~= formatted then soundObj.SoundId = formatted end
 		soundObj:Play()
@@ -1000,6 +1000,7 @@ local shellThemeLabel = createStatLabel("Theme: --", statsScroll)
 
 local compilerCommitLabel = createStatLabel("Compiler: Loading...", statsScroll)
 local uiCommitLabel = createStatLabel("UI: Loading...", statsScroll)
+local functionCommitLabel = createStatLabel("FncMgr: Loading...", statsScroll)
 
 task.spawn(function()
 	local compilerData = fetchLatestCommit("Core/compiler.lua")
@@ -1007,6 +1008,9 @@ task.spawn(function()
 
 	local uiData = fetchLatestCommit("Core/ui.lua")
 	uiCommitLabel.Text = string.format("UI: %s (%s)", uiData.Date, uiData.Message)
+
+	local funcData = fetchLatestCommit("Core/functions.lua")
+	functionCommitLabel.Text = string.format("FncMgr: %s (%s)", funcData.Date, funcData.Message)
 end)
 
 task.spawn(function()
@@ -1130,7 +1134,7 @@ while screenGui.Parent do
 				shellThemeLabel.Text = "Theme: " .. tostring(_G.ShellTheme or "Default")
 			end)
 		end
-		task.wait(SETTINGS.DevStatsFrequency or 0.25)
+		task.wait(_G.ShellSettings.Core.DevStatsFrequency or 0.25)
 	end
 end)
 
@@ -1146,63 +1150,200 @@ devConsoleFrame.Size = UDim2.new(1, 0, 1, 0)
 local settingsScroll = buildScrollingConsole("SettingsScroll", settingsPage)
 settingsScroll.Size = UDim2.new(1, 0, 1, 0)
 
-local function createSettingToggle(titleText, defaultState, isDisabled, callback)
-	local row = createUIElement("Frame", {
-		Size = UDim2.new(1, -10, 0, 32),
-		BackgroundColor3 = Color3.fromRGB(30, 30, 36),
-		BorderSizePixel = 0, Parent = settingsScroll
-	})
-	applyCorners(row)
+local function createSettingDropdown(titleText, optionsList, currentIndex, isDisabled, callback)
+    local row = createUIElement("Frame", {
+        Size = UDim2.new(1, -10, 0, 32),
+        BackgroundColor3 = Color3.fromRGB(30, 30, 36),
+        BorderSizePixel = 0, Parent = settingsScroll
+    })
+    applyCorners(row)
 
-	createUIElement("TextLabel", {
-		Size = UDim2.new(1, -60, 1, 0), Position = UDim2.new(0, 10, 0, 0),
-		BackgroundTransparency = 1, Text = titleText .. (isDisabled and " (Locked)" or ""),
-		TextColor3 = isDisabled and Color3.fromRGB(130, 130, 130) or toColor3(THEME.Text),
-		Font = Enum.Font.Gotham, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left, Parent = row
-	})
+    createUIElement("TextLabel", {
+        Size = UDim2.new(1, -100, 1, 0), Position = UDim2.new(0, 10, 0, 0),
+        BackgroundTransparency = 1, Text = titleText .. (isDisabled and " (Locked)" or ""),
+        TextColor3 = isDisabled and Color3.fromRGB(130, 130, 130) or toColor3(THEME.Text),
+        Font = Enum.Font.Gotham, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left, Parent = row
+    })
 
-	local toggleBtn = createUIElement("TextButton", {
-		Size = UDim2.new(0, 40, 0, 20), Position = UDim2.new(1, -50, 0.5, -10),
-		BackgroundColor3 = isDisabled and Color3.fromRGB(40, 40, 40) or (defaultState and toColor3(THEME.Accent) or Color3.fromRGB(50, 50, 60)),
-		Text = defaultState and "ON" or "OFF", TextColor3 = isDisabled and Color3.fromRGB(150, 150, 150) or Color3.fromRGB(255, 255, 255),
-		Font = Enum.Font.GothamBold, TextSize = 10, Parent = row
-	})
-	applyCorners(toggleBtn, UDim.new(0, 10))
+    local index = currentIndex or 1
+    local currentVal = optionsList[index] or "Select"
 
-	local state = defaultState
-	if not isDisabled then
-		toggleBtn.MouseButton1Click:Connect(function()
-			state = not state
-			toggleBtn.Text = state and "ON" or "OFF"
-			toggleBtn.BackgroundColor3 = state and toColor3(THEME.Accent) or Color3.fromRGB(50, 50, 60)
-			callback(state)
-		end)
-	end
+    local dropdownBtn = createUIElement("TextButton", {
+        Size = UDim2.new(0, 90, 0, 20), Position = UDim2.new(1, -100, 0.5, -10),
+        BackgroundColor3 = isDisabled and Color3.fromRGB(40, 40, 40) or Color3.fromRGB(50, 50, 60),
+        Text = tostring(currentVal), TextColor3 = isDisabled and Color3.fromRGB(150, 150, 150) or Color3.fromRGB(255, 255, 255),
+        Font = Enum.Font.GothamBold, TextSize = 10, Parent = row
+    })
+    applyCorners(dropdownBtn, UDim.new(0, 6))
+
+    if not isDisabled and type(optionsList) == "table" and #optionsList > 0 then
+        dropdownBtn.MouseButton1Click:Connect(function()
+            index = index + 1
+            if index > #optionsList then
+                index = 1
+            end
+            currentVal = optionsList[index]
+            dropdownBtn.Text = tostring(currentVal)
+            callback(currentVal, index)
+        end)
+    end
 end
 
+local function createSettingToggle(titleText, defaultState, isDisabled, callback)
+    local row = createUIElement("Frame", {
+        Size = UDim2.new(1, -10, 0, 32),
+        BackgroundColor3 = Color3.fromRGB(30, 30, 36),
+        BorderSizePixel = 0, Parent = settingsScroll
+    })
+    applyCorners(row)
+
+    createUIElement("TextLabel", {
+        Size = UDim2.new(1, -60, 1, 0), Position = UDim2.new(0, 10, 0, 0),
+        BackgroundTransparency = 1, Text = titleText .. (isDisabled and " (Locked)" or ""),
+        TextColor3 = isDisabled and Color3.fromRGB(130, 130, 130) or toColor3(THEME.Text),
+        Font = Enum.Font.Gotham, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Left, Parent = row
+    })
+
+    local toggleBtn = createUIElement("TextButton", {
+        Size = UDim2.new(0, 40, 0, 20), Position = UDim2.new(1, -50, 0.5, -10),
+        BackgroundColor3 = isDisabled and Color3.fromRGB(40, 40, 40) or (defaultState and toColor3(THEME.Accent) or Color3.fromRGB(50, 50, 60)),
+        Text = defaultState and "ON" or "OFF", TextColor3 = isDisabled and Color3.fromRGB(150, 150, 150) or Color3.fromRGB(255, 255, 255),
+        Font = Enum.Font.GothamBold, TextSize = 10, Parent = row
+    })
+    applyCorners(toggleBtn, UDim.new(0, 10))
+
+    local state = defaultState
+    if not isDisabled then
+        toggleBtn.MouseButton1Click:Connect(function()
+            state = not state
+            toggleBtn.Text = state and "ON" or "OFF"
+            toggleBtn.BackgroundColor3 = state and toColor3(THEME.Accent) or Color3.fromRGB(50, 50, 60)
+            callback(state)
+        end)
+    end
+end
+
+-- Ensure global table exists
+_G.ShellSettings = _G.ShellSettings or {}
+_G.ShellSettings.Core = _G.ShellSettings.Core or {}
+
 createStatLabel("-- GENERAL SETTINGS --", settingsScroll, true)
+
 createSettingToggle("Enable Dev Mode", _G.ShellDev or false, false, function(enabled)
-	_G.ShellDev = enabled
-	updateTabVisibilities()
+    _G.ShellDev = enabled
+    updateTabVisibilities()
 end)
 
-createSettingToggle("Auto-Scroll Console", SETTINGS.AutoScroll, false, function(enabled) SETTINGS.AutoScroll = enabled end)
-createSettingToggle("Show Console Timestamps", SETTINGS.ShowTimestamps, false, function(enabled) SETTINGS.ShowTimestamps = enabled end)
-createSettingToggle("Enable Audio Effects", SETTINGS.SoundEnabled, false, function(enabled) SETTINGS.SoundEnabled = enabled end)
+-- Dynamically generate settings from _G.ShellSettings.Core
+for settingName, defaultValue in pairs(_G.ShellSettings.Core) do
+    if type(defaultValue) == "boolean" then
+        createSettingToggle(settingName, defaultValue, false, function(enabled)
+            _G.ShellSettings.Core[settingName] = enabled
+        end)
+    end
+end
 
 createDivider(settingsScroll)
 createStatLabel("-- TAB VISIBILITY MENU --", settingsScroll, true)
 
 createSettingToggle("Console Tab", true, true, function() end)
-createSettingToggle("Scripts Tab", TAB_VISIBILITY_SETTINGS.Scripts, false, function(enabled)
-	TAB_VISIBILITY_SETTINGS.Scripts = enabled
-	updateTabVisibilities()
+
+createSettingToggle("Scripts Tab", _G.ShellSettings.Core.ScriptTabVis ~= false, false, function(enabled)
+    _G.ShellSettings.Core.ScriptTabVis = enabled
+    updateTabVisibilities()
 end)
-createSettingToggle("Waypoints Tab", TAB_VISIBILITY_SETTINGS.Waypoints, false, function(enabled)
-	TAB_VISIBILITY_SETTINGS.Waypoints = enabled
-	updateTabVisibilities()
+
+createSettingToggle("Waypoints Tab", _G.ShellSettings.Core.WaypointTabVis ~= false, false, function(enabled)
+    _G.ShellSettings.Core.WaypointTabVis = enabled
+    updateTabVisibilities()
 end)
+
 createSettingToggle("Settings Tab", true, true, function() end)
+
+local function refreshSettingsUI()
+    if not settingsScroll then return end
+
+    -- Remove previously generated dynamic elements (Frames, TextLabels, Dividers/UI objects) to prevent duplicates
+    for _, child in ipairs(settingsScroll:GetChildren()) do
+        if child:IsA("Frame") or child:IsA("TextLabel") then
+            child:Destroy()
+        end
+    end
+
+    -- Re-render General Settings header and toggles
+    createStatLabel("-- GENERAL SETTINGS --", settingsScroll, true)
+    
+    createSettingToggle("Enable Dev Mode", _G.ShellDev or false, false, function(enabled)
+        _G.ShellDev = enabled
+        updateTabVisibilities()
+    end)
+
+    if _G.ShellSettings and _G.ShellSettings.Core then
+        for settingName, defaultValue in pairs(_G.ShellSettings.Core) do
+            if type(defaultValue) == "boolean" then
+                createSettingToggle(settingName, defaultValue, false, function(enabled)
+                    _G.ShellSettings.Core[settingName] = enabled
+                end)
+            end
+        end
+    end
+
+    -- Re-render Tab Visibility header and toggles
+    createDivider(settingsScroll)
+    createStatLabel("-- TAB VISIBILITY MENU --", settingsScroll, true)
+
+    createSettingToggle("Console Tab", true, true, function() end)
+
+    if _G.ShellSettings and _G.ShellSettings.Core then
+        createSettingToggle("Scripts Tab", _G.ShellSettings.Core.ScriptTabVis ~= false, false, function(enabled)
+            _G.ShellSettings.Core.ScriptTabVis = enabled
+            updateTabVisibilities()
+        end)
+
+        createSettingToggle("Waypoints Tab", _G.ShellSettings.Core.WaypointTabVis ~= false, false, function(enabled)
+            _G.ShellSettings.Core.WaypointTabVis = enabled
+            updateTabVisibilities()
+        end)
+    end
+
+    createSettingToggle("Settings Tab", true, true, function() end)
+
+    -- Re-render Command/Script specific settings from _G.ShellSettings.Scripts
+    if _G.ShellSettings and _G.ShellSettings.Scripts and next(_G.ShellSettings.Scripts) ~= nil then
+        createDivider(settingsScroll)
+        createStatLabel("-- SCRIPT SETTINGS --", settingsScroll, true)
+
+        for cmdName, settingsTable in pairs(_G.ShellSettings.Scripts) do
+            if type(settingsTable) == "table" then
+                for settingKey, settingOptions in pairs(settingsTable) do
+                    local titleText = cmdName .. ": " .. settingKey
+                    
+                    if type(settingOptions) == "boolean" then
+                        createSettingToggle(titleText, settingOptions, false, function(enabled)
+                            _G.ShellSettings.Scripts[cmdName][settingKey] = enabled
+                        end)
+                    elseif type(settingOptions) == "table" then
+                        local currentIndex = 1
+                        -- Check if the current saved value matches one of the options to set the initial index
+                        local currentVal = _G.ShellSettings.Scripts[cmdName][settingKey]
+                        if type(currentVal) == "string" then
+                            for i, opt in ipairs(settingOptions) do
+                                if opt == currentVal then
+                                    currentIndex = i
+                                    break
+                                end
+                            end
+                        end
+
+                        createSettingDropdown(titleText, settingOptions, currentIndex, false, function(selectedVal, newIndex)
+                            _G.ShellSettings.Scripts[cmdName][settingKey] = selectedVal
+                        end)
+                    end
+                end
+            end
+        end
+    end
+end
 
 switchTab("Console")
 
@@ -1301,7 +1442,7 @@ local function shellLog(text, logTypeOrColor)
 	end
 
 	local targetConsole = isDev and devConsoleFrame or consoleFrame
-	local logText = SETTINGS.ShowTimestamps and string.format("[%s] %s", os.date("%H:%M:%S"), tostring(text)) or tostring(text)
+	local logText = _G.ShellSettings.Core.Timestamps and string.format("[%s] %s", os.date("%H:%M:%S"), tostring(text)) or tostring(text)
 
 	local logEntry = createUIElement("TextBox", {
 		Name = "LogEntry", BackgroundTransparency = 1, Size = UDim2.new(1, -10, 0, 0),
@@ -1314,7 +1455,7 @@ local function shellLog(text, logTypeOrColor)
 
 	applyConsoleFilters()
 
-	if SETTINGS.AutoScroll then
+	if _G.ShellSettings.Core.AutoScroll then
 		task.defer(function() targetConsole.CanvasPosition = Vector2.new(0, 100000) end)
 	end
 end
@@ -1328,9 +1469,14 @@ shellLog("Press F2 or ' to toggle/focus visibility.", THEME.Placeholder)
 local isMinimized, lastCommand = false, ""
 
 _G.ShellUIUpdate = function(newCommands)
-	commands = newCommands or {}
-	local count = 0; for _ in pairs(commands) do count += 1 end
-	shellLog("Command map synchronized. (" .. count .. " entries)", THEME.Accent)
+    commands = newCommands or {}
+    local count = 0; for _ in pairs(commands) do count += 1 end
+    shellLog("Command map synchronized. (" .. count .. " entries)", THEME.Accent)
+    
+    -- Refresh connected command settings in the UI if applicable
+    if type(refreshSettingsUI) == "function" then
+        pcall(refreshSettingsUI)
+    end
 end
 
 local tweenInfo = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
