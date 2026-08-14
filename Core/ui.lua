@@ -368,30 +368,47 @@ local function buildScrollingConsole(name, parent, size, pos, skipLayout)
 	return scroll
 end
 
-local function createTabPage(name)
-	local page = createUIElement("Frame", {
-		Name = name .. "Page", Size = UDim2.new(1, 0, 1, 0),
-		BackgroundTransparency = 1, Visible = false, Parent = container
-	})
-	tabPages[name] = page
+local tabPages = {}
+local tabButtons = {}
+local tabCloseButtons = {}
+local dropdownItems = {}
 
-	local btn = createUIElement("TextButton", {
-		Name = name .. "TabBtn", Size = UDim2.new(0, 80, 1, -4),
-		BackgroundColor3 = toColor3(THEME.Header, THEME.Border),
-		BorderSizePixel = 0, Text = name, TextColor3 = toColor3(THEME.Placeholder),
-		Font = Enum.Font.GothamBold, TextSize = 10, Parent = tabBar
-	})
-	applyCorners(btn, UDim.new(0, 4))
-	tabButtons[name] = btn
+-- Create Dropdown Menu as a child of the Main Frame/container so it renders nicely below the plus button
+local dropdownFrame = createUIElement("Frame", {
+	Name = "TabDropdownMenu",
+	Size = UDim2.new(0, 130, 0, 0),
+	Position = UDim2.new(1, -135, 0, 32),
+	BackgroundColor3 = toColor3(THEME.Header, THEME.Border),
+	BorderSizePixel = 0,
+	Visible = false,
+	ZIndex = 50,
+	Parent = tabBar.Parent
+})
+applyCorners(dropdownFrame, UDim.new(0, 4))
 
-	local indicator = createUIElement("Frame", {
-		Name = "Indicator", Size = UDim2.new(1, 0, 0, 2),
-		Position = UDim2.new(0, 0, 1, -2), BackgroundColor3 = toColor3(THEME.Accent),
-		BorderSizePixel = 0, Visible = false, Parent = btn
-	})
+local dropdownLayout = createUIElement("UIListLayout", {
+	SortOrder = Enum.SortOrder.LayoutOrder,
+	Padding = UDim.new(0, 2),
+	Parent = dropdownFrame
+})
 
-	return page, btn, indicator
-end
+-- Create '+' Tab at the far right
+local plusBtn = createUIElement("TextButton", {
+	Name = "PlusTabBtn", Size = UDim2.new(0, 30, 1, -4),
+	BackgroundColor3 = toColor3(THEME.Header, THEME.Border),
+	BorderSizePixel = 0, Text = "+", TextColor3 = toColor3(THEME.Placeholder),
+	Font = Enum.Font.GothamBold, TextSize = 14, Parent = tabBar
+})
+applyCorners(plusBtn, UDim.new(0, 4))
+
+plusBtn.MouseButton1Click:Connect(function()
+	dropdownFrame.Visible = not dropdownFrame.Visible
+	local itemCount = 0
+	for _, _ in pairs(dropdownItems) do
+		itemCount = itemCount + 1
+	end
+	dropdownFrame.Size = UDim2.new(0, 130, 0, (itemCount * 24) + 4)
+end)
 
 local function switchTab(targetName)
 	activeTabName = targetName
@@ -400,20 +417,110 @@ local function switchTab(targetName)
 		page.Visible = isTarget
 		local btn = tabButtons[name]
 		if btn then
-			btn.TextColor3 = toColor3(isTarget and THEME.Accent or THEME.Placeholder)
+			local title = btn:FindFirstChild("Title")
+			if title then
+				title.TextColor3 = toColor3(isTarget and THEME.Accent or THEME.Placeholder)
+			end
 			local ind = btn:FindFirstChild("Indicator")
 			if ind then ind.Visible = isTarget end
 		end
 	end
 end
 
+local function createTabPage(name, canClose)
+	canClose = (canClose ~= nil) and canClose or true
+
+	local page = createUIElement("Frame", {
+		Name = name .. "Page", Size = UDim2.new(1, 0, 1, 0),
+		BackgroundTransparency = 1, Visible = false, Parent = container
+	})
+	tabPages[name] = page
+
+	local btnWidth = canClose and 105 or 80
+	local btn = createUIElement("TextButton", {
+		Name = name .. "TabBtn", Size = UDim2.new(0, btnWidth, 1, -4),
+		BackgroundColor3 = toColor3(THEME.Header, THEME.Border),
+		BorderSizePixel = 0, Text = "", Parent = tabBar
+	})
+	applyCorners(btn, UDim.new(0, 4))
+	tabButtons[name] = btn
+
+	local textLabel = createUIElement("TextLabel", {
+		Name = "Title", Size = UDim2.new(1, canClose and -22 or 0, 1, 0),
+		Position = UDim2.new(0, 8, 0, 0), BackgroundTransparency = 1,
+		Text = name, TextColor3 = toColor3(THEME.Placeholder),
+		Font = Enum.Font.GothamBold, TextSize = 10, TextXAlignment = Enum.TextXAlignment.Left,
+		Parent = btn
+	})
+
+	local indicator = createUIElement("Frame", {
+		Name = "Indicator", Size = UDim2.new(1, 0, 0, 2),
+		Position = UDim2.new(0, 0, 1, -2), BackgroundColor3 = toColor3(THEME.Accent),
+		BorderSizePixel = 0, Visible = false, Parent = btn
+	})
+
+	if canClose then
+		local closeBtn = createUIElement("TextButton", {
+			Name = "CloseBtn", Size = UDim2.new(0, 16, 0, 16),
+			Position = UDim2.new(1, -18, 0.5, -8), BackgroundTransparency = 1,
+			Text = "×", TextColor3 = toColor3(THEME.Placeholder),
+			Font = Enum.Font.GothamBold, TextSize = 12, Parent = btn
+		})
+		tabCloseButtons[name] = closeBtn
+
+		closeBtn.MouseButton1Click:Connect(function()
+			TAB_VISIBILITY_SETTINGS[name] = false
+			updateTabVisibilities()
+			if activeTabName == name then
+				for otherName, p in pairs(tabPages) do
+					if p.Visible and otherName ~= name then
+						switchTab(otherName)
+						break
+					end
+				end
+			end
+		end)
+	end
+
+	-- Dropdown Toggle Item
+	local dropItem = createUIElement("TextButton", {
+		Name = name .. "DropItem", Size = UDim2.new(1, 0, 0, 24),
+		BackgroundTransparency = 1, Text = "  " .. name,
+		TextColor3 = toColor3(THEME.Placeholder),
+		Font = Enum.Font.Gotham, TextSize = 10, TextXAlignment = Enum.TextXAlignment.Left,
+		ZIndex = 51,
+		Parent = dropdownFrame
+	})
+	dropdownItems[name] = dropItem
+
+	dropItem.MouseButton1Click:Connect(function()
+		local currentState = TAB_VISIBILITY_SETTINGS[name] ~= false
+		TAB_VISIBILITY_SETTINGS[name] = not currentState
+		updateTabVisibilities()
+	end)
+
+	btn.MouseButton1Click:Connect(function()
+		switchTab(name)
+	end)
+
+	return page, btn, indicator
+end
+
 local function updateTabVisibilities()
 	local devEnabled = _G.ShellDev == true
 	for name, btn in pairs(tabButtons) do
+		local isVisible = true
 		if name == "Statistics" or name == "Dev Console" then
-			btn.Visible = devEnabled
+			isVisible = devEnabled and (TAB_VISIBILITY_SETTINGS[name] ~= false)
 		elseif TAB_VISIBILITY_SETTINGS[name] ~= nil then
-			btn.Visible = TAB_VISIBILITY_SETTINGS[name]
+			isVisible = TAB_VISIBILITY_SETTINGS[name]
+		end
+		
+		btn.Visible = isVisible
+		
+		local dropItem = dropdownItems[name]
+		if dropItem then
+			dropItem.TextColor3 = toColor3(isVisible and THEME.Accent or THEME.Placeholder)
 		end
 	end
 
@@ -430,13 +537,6 @@ local waypointsPage, waypointsBtn = createTabPage("Waypoints")
 local statsPage, statsBtn = createTabPage("Statistics")
 local devConsolePage, devConsoleBtn = createTabPage("Dev Console")
 local settingsPage, settingsBtn = createTabPage("Settings")
-
-consoleBtn.MouseButton1Click:Connect(function() switchTab("Console") end)
-scriptsBtn.MouseButton1Click:Connect(function() switchTab("Scripts") end)
-waypointsBtn.MouseButton1Click:Connect(function() switchTab("Waypoints") end)
-statsBtn.MouseButton1Click:Connect(function() switchTab("Statistics") end)
-devConsoleBtn.MouseButton1Click:Connect(function() switchTab("Dev Console") end)
-settingsBtn.MouseButton1Click:Connect(function() switchTab("Settings") end)
 
 task.spawn(function()
 	while screenGui.Parent do
@@ -1287,26 +1387,6 @@ local function refreshSettingsUI()
             end
         end
     end
-
-    -- Re-render Tab Visibility header and toggles
-    createDivider(settingsScroll)
-    createStatLabel("-- TAB VISIBILITY MENU --", settingsScroll, true)
-
-    createSettingToggle("Console Tab", true, true, function() end)
-
-    if _G.ShellSettings and _G.ShellSettings.Core then
-        createSettingToggle("Scripts Tab", _G.ShellSettings.Core.ScriptTabVis ~= false, false, function(enabled)
-            _G.ShellSettings.Core.ScriptTabVis = enabled
-            updateTabVisibilities()
-        end)
-
-        createSettingToggle("Waypoints Tab", _G.ShellSettings.Core.WaypointTabVis ~= false, false, function(enabled)
-            _G.ShellSettings.Core.WaypointTabVis = enabled
-            updateTabVisibilities()
-        end)
-    end
-
-    createSettingToggle("Settings Tab", true, true, function() end)
 
     -- Re-render Command/Script specific settings from _G.ShellSettings.Scripts
     if _G.ShellSettings and _G.ShellSettings.Scripts and next(_G.ShellSettings.Scripts) ~= nil then
