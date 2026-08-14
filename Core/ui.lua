@@ -1390,10 +1390,10 @@ local function refreshSettingsUI()
 
     -- Re-render Command/Script specific settings from _G.ShellSettings.Scripts
     if _G.ShellSettings and _G.ShellSettings.Scripts and next(_G.ShellSettings.Scripts) ~= nil then
-        createDivider(settingsScroll)
         createStatLabel("-- SCRIPT SETTINGS --", settingsScroll, true)
 
         for cmdName, settingsTable in pairs(_G.ShellSettings.Scripts) do
+        	createStatLabel(cmdName, settingsScroll, true)
             if type(settingsTable) == "table" then
                 for settingKey, settingOptions in pairs(settingsTable) do
                     local titleText = cmdName .. ": " .. settingKey
