@@ -1,9 +1,30 @@
 local functionsList = {}
 local gameId = tostring(game.PlaceId)
+local CONFIG_PATH = "Shell/Core/config.json"
+
+-- Ensure ShellSettings global table exists
+_G.ShellSettings = _G.ShellSettings or {}
+_G.ShellSettings.Core = _G.ShellSettings.Core or {
+    Developer = false,
+    AutoScroll = true,
+    Timestamps = true,
+    Audio = true,
+    ScriptTabVis = true,
+    WaypointTabVis = true,
+    ConsoleTabVis = true,
+    SettingsTabVis = true
+}
 
 local function devlog(msg)
     if _G.ShellLog then
         _G.ShellLog(msg, "developer")
+    end
+end
+
+local function registerSettings(cmdName, value)
+    if value and type(value.Settings) == "table" and cmdName then
+        _G.ShellSettings.Scripts = _G.ShellSettings.Scripts or {}
+        _G.ShellSettings.Scripts[cmdName] = value.Settings
     end
 end
 
@@ -16,7 +37,9 @@ local function processResult(result, category)
     -- Case 1: The file directly returned a single command table (e.g., result.Name exists)
     if result.Name and result.Function then
         result.Category = result.Category or category
-        functionsList[result.Name:lower()] = result
+        local cmdName = result.Name
+        functionsList[cmdName:lower()] = result
+        registerSettings(cmdName, result)
     else
         -- Case 2: The file returned a container table (array or dictionary) of multiple commands
         for key, value in pairs(result) do
@@ -26,6 +49,7 @@ local function processResult(result, category)
                 if cmdName and (value.Category ~= "_shelldev" or _G.ShellDev == true) then
                     value.Name = cmdName
                     functionsList[cmdName:lower()] = value
+                    registerSettings(cmdName, value)
                 end
             end
         end
@@ -57,34 +81,40 @@ local function loadDirectory(dir, category)
     end
 end
 
-local function loadImportedCSV(csvPath)
-    devlog("functions.lua -- Loading imported CSV: " .. csvPath)
-    if not readfile or not isfile or not isfile(csvPath) then return end
+local function loadImportedConfig()
+    devlog("functions.lua -- Loading imported URLs from " .. CONFIG_PATH)
+    if not readfile or not isfile or not isfile(CONFIG_PATH) then return end
 
-    local success, content = pcall(readfile, csvPath)
+    local success, content = pcall(readfile, CONFIG_PATH)
     if not success or not content then return end
 
-    for line in content:gmatch("[^\r\n]+") do
-        -- Isolate each line entry inside its own pcall wrapper
+    local decodeSuccess, decoded = pcall(function()
+        return game:GetService("HttpService"):JSONDecode(content)
+    end)
+
+    if not decodeSuccess or type(decoded) ~= "table" or not decoded.imported then
+        return
+    end
+
+    for _, url in ipairs(decoded.imported) do
         local lineSuccess, lineError = pcall(function()
-            -- Trim whitespace and quote characters
-            local url = line:match("^%s*[\"']?(.-)[\"']?%s*$")
+            local cleanUrl = tostring(url):match("^%s*[\"']?(.-)[\"']?%s*$")
             
-            if url and url ~= "" and not url:find("^%s*#") then
-                local rawScript = game:HttpGet(url)
+            if cleanUrl and cleanUrl ~= "" and not cleanUrl:find("^%s*#") then
+                local rawScript = game:HttpGet(cleanUrl)
                 local compiledFunc, compileErr = loadstring(rawScript)
                 
                 if not compiledFunc then
                     error("Compile error: " .. tostring(compileErr))
                 end
-                devlog("functions.lua -- Processing imported functions: " .. url)
+                devlog("functions.lua -- Processing imported functions: " .. cleanUrl)
                 local chunk = compiledFunc()
                 processResult(chunk, "Imported")
             end
         end)
 
         if not lineSuccess then
-            devlog("functions.lua -- Error processing CSV entry (" .. tostring(line) .. "): " .. tostring(lineError))
+            devlog("functions.lua -- Error processing config import entry (" .. tostring(url) .. "): " .. tostring(lineError))
         end
     end
 end
@@ -112,7 +142,7 @@ if listfiles then
     end
 end
 
--- Load functions from Shell/Core/imported.csv
-pcall(loadImportedCSV, "Shell/Core/imported.csv")
+-- Load functions from config.json instead of imported.csv
+pcall(loadImportedConfig)
 
 return functionsList
