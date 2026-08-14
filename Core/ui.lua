@@ -1334,7 +1334,7 @@ local function refreshSettingsUI()
                                 end
                             end
                         end
-
+						_G.ShellSettings.Scripts[cmdName][settingKey] = _G.ShellSettings.Scripts[cmdName][settingKey][1]
                         createSettingDropdown(titleText, settingOptions, currentIndex, false, function(selectedVal, newIndex)
                             _G.ShellSettings.Scripts[cmdName][settingKey] = selectedVal
                         end)
