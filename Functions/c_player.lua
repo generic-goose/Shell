@@ -155,16 +155,24 @@ Functions["esp"] = {
             local teamLabel = Drawing.new("Text")
             teamLabel.Visible = false
             teamLabel.Size = 14
-            teamLabel.Center = true
+            teamLabel.Center = false
             teamLabel.Outline = true
             table.insert(activeDrawings, teamLabel)
 
             local healthLabel = Drawing.new("Text")
             healthLabel.Visible = false
             healthLabel.Size = 14
-            healthLabel.Center = true
+            healthLabel.Center = false
             healthLabel.Outline = true
             table.insert(activeDrawings, healthLabel)
+
+            local toolLabel = Drawing.new("Text")
+            toolLabel.Visible = false
+            toolLabel.Size = 14
+            toolLabel.Center = false
+            toolLabel.Outline = true
+            toolLabel.Color = Color3.new(1, 1, 1)
+            table.insert(activeDrawings, toolLabel)
 
             local connection
             connection = RunService.RenderStepped:Connect(function()
@@ -176,6 +184,7 @@ Functions["esp"] = {
                     nameLabel.Visible = false
                     teamLabel.Visible = false
                     healthLabel.Visible = false
+                    toolLabel.Visible = false
                     return
                 end
 
@@ -201,29 +210,41 @@ Functions["esp"] = {
                     box.Position = Vector2.new(topVector.X - width / 2, topVector.Y)
                     box.Visible = true
 
-                    -- Username label
+                    -- Username centered above the box
                     nameLabel.Text = player.Name
                     nameLabel.Position = Vector2.new(topVector.X, topVector.Y - 18)
                     nameLabel.Visible = true
 
-                    -- Team name label (colored with team color)
+                    -- Stats aligned to the right of the box
+                    local rightX = box.Position.X + box.Size.X + 4
+                    local startY = box.Position.Y
+
+                    -- Team Name Label
                     local teamName = player.Team and player.Team.Name or "No Team"
-                    teamLabel.Text = "[" .. teamName .. "]"
+                    teamLabel.Text = "Team: " .. teamName
                     teamLabel.Color = teamColor
-                    teamLabel.Position = Vector2.new(topVector.X, topVector.Y - 34)
+                    teamLabel.Position = Vector2.new(rightX, startY)
                     teamLabel.Visible = true
 
-                    -- Health label (Green to Red gradient)
+                    -- Health Label (Green to Red gradient)
                     local healthPercent = math.clamp(humanoid.Health / humanoid.MaxHealth, 0, 1)
                     healthLabel.Color = Color3.new(1 - healthPercent, healthPercent, 0)
                     healthLabel.Text = "HP: " .. math.floor(humanoid.Health)
-                    healthLabel.Position = Vector2.new(topVector.X, topVector.Y - 50)
+                    healthLabel.Position = Vector2.new(rightX, startY + 16)
                     healthLabel.Visible = true
+
+                    -- Equipped Tool Label
+                    local equippedTool = character:FindFirstChildOfClass("Tool")
+                    local toolName = equippedTool and equippedTool.Name or "None"
+                    toolLabel.Text = "Tool: " .. toolName
+                    toolLabel.Position = Vector2.new(rightX, startY + 32)
+                    toolLabel.Visible = true
                 else
                     box.Visible = false
                     nameLabel.Visible = false
                     teamLabel.Visible = false
                     healthLabel.Visible = false
+                    toolLabel.Visible = false
                 end
 
                 if not player.Parent then
@@ -231,6 +252,7 @@ Functions["esp"] = {
                     nameLabel:Remove()
                     teamLabel:Remove()
                     healthLabel:Remove()
+                    toolLabel:Remove()
                     connection:Disconnect()
                 end
             end)
@@ -245,7 +267,6 @@ Functions["esp"] = {
         table.insert(activeConnections, playerAddedConn)
     end
 }
-
 -- Spectate / View
 Functions["view"] = {
     Name = "view",
