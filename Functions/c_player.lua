@@ -54,45 +54,6 @@ end
 --------------------------------------------------------------------------------
 -- Cleanup Handler for ESP & View
 --------------------------------------------------------------------------------
-local espPlayers = {}
-
-local function removeESP(char)
-    if not char then devlog("c_player.lua -- expected affected character, got nil or error.") return end
-    local existing = char:FindFirstChild("ShellESP")
-    if existing then
-        existing:Destroy()
-    end
-end
-
-local function cleanupVisuals()
-    -- Clear all Highlights
-    for _, plr in pairs(Players:GetPlayers()) do
-        if plr.Character then
-            removeESP(plr.Character)
-        end
-    end
-    table.clear(espPlayers)
-
-    -- Reset Camera
-    local camera = Workspace.CurrentCamera
-    if camera then
-        local hum, _ = getLocalCharacterParts()
-        if hum then
-            camera.CameraSubject = hum
-        end
-    end
-end
-
--- Monitor ShellRunning flag to handle unexpected script stops
-task.spawn(function()
-    while true do
-        if _G.ShellRunning == false then
-            cleanupVisuals()
-            break
-        end
-        task.wait(0.2)
-    end
-end)
 
 --------------------------------------------------------------------------------
 -- Teleport Commands
@@ -146,65 +107,142 @@ Functions["tp"] = {
 -- Visual Commands
 --------------------------------------------------------------------------------
 
--- Highlight / ESP
+local espEnabled = false
+local activeConnections = {}
+local activeDrawings = {}
+
 Functions["esp"] = {
     Name = "esp",
-    Arguments = {"Player"},
+    Arguments = {},
     Category = "Visual",
-    Function = function(targetArg)
-        local function applyESP(char)
-            if not char then devlog("c_player.lua -- expected affected character, got nil or error.") return end
-            removeESP(char)
+    Function = function()
+        espEnabled = not espEnabled
 
-            local highlight = Instance.new("Highlight")
-            highlight.Name = "ShellESP"
-            highlight.Adornee = char
-            highlight.FillColor = Players:WaitForChild(char.Name).TeamColor.Color or Color3.fromRGB(255, 255, 255)
-            highlight.OutlineColor = Players:WaitForChild(char.Name).TeamColor.Color or Color3.fromRGB(100, 100, 100)
-            highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-            highlight.Parent = char
+        if not espEnabled then
+            for _, conn in ipairs(activeConnections) do
+                if conn then conn:Disconnect() end
+            end
+            activeConnections = {}
+
+            for _, drawing in ipairs(activeDrawings) do
+                if drawing then drawing:Remove() end
+            end
+            activeDrawings = {}
+            return
         end
 
-        local function toggleESP(targetPlayer)
-            if not targetPlayer then devlog("c_player.lua -- expected targetPlayer, got nil or error.") return end
+        local Players = game:GetService("Players")
+        local RunService = game:GetService("RunService")
+        local LocalPlayer = Players.LocalPlayer
 
-            if espPlayers[targetPlayer] then
-                -- Disable ESP for this player
-                espPlayers[targetPlayer]:Disconnect()
-                espPlayers[targetPlayer] = nil
-                if targetPlayer.Character then
-                    removeESP(targetPlayer.Character)
-                end
-            else
-                -- Enable ESP & hook into re-spawns
-                if targetPlayer.Character then
-                    applyESP(targetPlayer.Character)
-                end
+        local function createESP(player)
+            if player == LocalPlayer then return end
+
+            local box = Drawing.new("Square")
+            box.Visible = false
+            box.Filled = false
+            box.Thickness = 1
+            table.insert(activeDrawings, box)
+
+            local nameLabel = Drawing.new("Text")
+            nameLabel.Visible = false
+            nameLabel.Size = 14
+            nameLabel.Center = true
+            nameLabel.Outline = true
+            nameLabel.Color = Color3.new(1, 1, 1) -- White
+            table.insert(activeDrawings, nameLabel)
+
+            local teamLabel = Drawing.new("Text")
+            teamLabel.Visible = false
+            teamLabel.Size = 14
+            teamLabel.Center = true
+            teamLabel.Outline = true
+            table.insert(activeDrawings, teamLabel)
+
+            local healthLabel = Drawing.new("Text")
+            healthLabel.Visible = false
+            healthLabel.Size = 14
+            healthLabel.Center = true
+            healthLabel.Outline = true
+            table.insert(activeDrawings, healthLabel)
+
+            local connection
+            connection = RunService.RenderStepped:Connect(function()
+                if not espEnabled then return end
                 
-                espPlayers[targetPlayer] = targetPlayer.CharacterAdded:Connect(function(newChar)
-                    if _G.ShellRunning ~= false and espPlayers[targetPlayer] then
-                        applyESP(newChar)
-                    end
-                end)
-            end
+                local character = player.Character
+                if not character or not character:FindFirstChild("HumanoidRootPart") or not character:FindFirstChild("Humanoid") then
+                    box.Visible = false
+                    nameLabel.Visible = false
+                    teamLabel.Visible = false
+                    healthLabel.Visible = false
+                    return
+                end
+
+                local rootPart = character.HumanoidRootPart
+                local humanoid = character.Humanoid
+                local camera = workspace.CurrentCamera
+
+                local cf, size = character:GetBoundingBox()
+                local topCenter = (cf + Vector3.new(0, size.Y / 2, 0)).Position
+                local bottomCenter = (cf - Vector3.new(0, size.Y / 2, 0)).Position
+
+                local topVector, topOnScreen = camera:WorldToViewportPoint(topCenter)
+                local bottomVector, bottomOnScreen = camera:WorldToViewportPoint(bottomCenter)
+
+                if topOnScreen or bottomOnScreen then
+                    local teamColor = player.Team and player.Team.TeamColor.Color or Color3.new(1, 1, 1)
+                    box.Color = teamColor
+
+                    local height = math.abs(bottomVector.Y - topVector.Y)
+                    local width = height / 2
+
+                    box.Size = Vector2.new(width, height)
+                    box.Position = Vector2.new(topVector.X - width / 2, topVector.Y)
+                    box.Visible = true
+
+                    -- Username label
+                    nameLabel.Text = player.Name
+                    nameLabel.Position = Vector2.new(topVector.X, topVector.Y - 18)
+                    nameLabel.Visible = true
+
+                    -- Team name label (colored with team color)
+                    local teamName = player.Team and player.Team.Name or "No Team"
+                    teamLabel.Text = "[" .. teamName .. "]"
+                    teamLabel.Color = teamColor
+                    teamLabel.Position = Vector2.new(topVector.X, topVector.Y - 34)
+                    teamLabel.Visible = true
+
+                    -- Health label (Green to Red gradient)
+                    local healthPercent = math.clamp(humanoid.Health / humanoid.MaxHealth, 0, 1)
+                    healthLabel.Color = Color3.new(1 - healthPercent, healthPercent, 0)
+                    healthLabel.Text = "HP: " .. math.floor(humanoid.Health)
+                    healthLabel.Position = Vector2.new(topVector.X, topVector.Y - 50)
+                    healthLabel.Visible = true
+                else
+                    box.Visible = false
+                    nameLabel.Visible = false
+                    teamLabel.Visible = false
+                    healthLabel.Visible = false
+                end
+
+                if not player.Parent then
+                    box:Remove()
+                    nameLabel:Remove()
+                    teamLabel:Remove()
+                    healthLabel:Remove()
+                    connection:Disconnect()
+                end
+            end)
+            table.insert(activeConnections, connection)
         end
 
-        if not targetArg or targetArg == "" or targetArg:lower() == "all" then
-            for _, plr in pairs(Players:GetPlayers()) do
-                if plr ~= LocalPlayer then
-                    toggleESP(plr)
-                end
-            end
-            logFunc("Toggled ESP for all players.", "default")
-        else
-            local targetPlayer = findPlayerByName(targetArg)
-            if targetPlayer then
-                toggleESP(targetPlayer)
-                logFunc("Toggled ESP for " .. targetPlayer.Name .. ".", "default")
-            else
-                logFunc("Player not found or character does not exist.", "warn")
-            end
+        for _, player in ipairs(Players:GetPlayers()) do
+            createESP(player)
         end
+
+        local playerAddedConn = Players.PlayerAdded:Connect(createESP)
+        table.insert(activeConnections, playerAddedConn)
     end
 }
 
