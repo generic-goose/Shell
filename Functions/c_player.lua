@@ -114,6 +114,10 @@ local activeDrawings = {}
 Functions["esp"] = {
     Name = "esp",
     Arguments = {},
+    Settings = {
+        Tracers = false,
+        ClickFunction = {"None", "Teleport", "TweenTo", "View"}
+    },
     Category = "Visual",
     Function = function()
         espEnabled = not espEnabled
@@ -131,9 +135,97 @@ Functions["esp"] = {
             return
         end
 
+        -- Ensure settings structure exists to prevent nil errors
+        _G.ShellSettings = _G.ShellSettings or {}
+        _G.ShellSettings.Scripts = _G.ShellSettings.Scripts or {}
+        _G.ShellSettings.Scripts["esp"] = _G.ShellSettings.Scripts["esp"] or {
+            Tracers = false,
+            ClickFunction = "None"
+        }
+
+        local CmdSettings = _G.ShellSettings.Scripts["esp"]
         local Players = game:GetService("Players")
         local RunService = game:GetService("RunService")
+        local UserInputService = game:GetService("UserInputService")
+        local TweenService = game:GetService("TweenService")
         local LocalPlayer = Players.LocalPlayer
+
+        -- Global click detection for the boxes
+        local clickConnection = UserInputService.InputBegan:Connect(function(input)
+            if not espEnabled then return end
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                local mousePos = UserInputService:GetMouseLocation()
+                
+                for _, player in ipairs(Players:GetPlayers()) do
+                    if player ~= LocalPlayer and player.Character then
+                        local character = player.Character
+                        local rootPart = character:FindFirstChild("HumanoidRootPart")
+                        local humanoid = character:FindFirstChild("Humanoid")
+                        
+                        if rootPart and humanoid and humanoid.Health > 0 then
+                            local camera = workspace.CurrentCamera
+                            local cf, size = character:GetBoundingBox()
+                            local topCenter = (cf + Vector3.new(0, size.Y / 2, 0)).Position
+                            local bottomCenter = (cf - Vector3.new(0, size.Y / 2, 0)).Position
+
+                            local topVector, topOnScreen = camera:WorldToViewportPoint(topCenter)
+                            local bottomVector, bottomOnScreen = camera:WorldToViewportPoint(bottomCenter)
+
+                            if topOnScreen or bottomOnScreen then
+                                local height = math.abs(bottomVector.Y - topVector.Y)
+                                local width = height / 2
+                                local boxPos = Vector2.new(topVector.X - width / 2, topVector.Y)
+                                local boxSize = Vector2.new(width, height)
+
+                                if mousePos.X >= boxPos.X and mousePos.X <= boxPos.X + boxSize.X and
+                                   mousePos.Y >= boxPos.Y and mousePos.Y <= boxPos.Y + boxSize.Y then
+                                    
+                                    if CmdSettings.ClickFunction == "Teleport" then
+                                        if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                                            LocalPlayer.Character:PivotTo(rootPart:GetPivot())
+                                        end
+                                    elseif CmdSettings.ClickFunction == "TweenTo" then
+                                        local localRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                                        if localRoot then
+                                            local targetCFrame = rootPart:GetPivot()
+                                            local distance = (localRoot.Position - rootPart.Position).Magnitude
+                                            local duration = math.max(distance / 200, 0.05)
+
+                                            local tweenInfo = TweenInfo.new(
+                                                duration,
+                                                Enum.EasingStyle.Linear,
+                                                Enum.EasingDirection.Out
+                                            )
+
+                                            local tween = TweenService:Create(localRoot, tweenInfo, { CFrame = targetCFrame })
+                                            tween:Play()
+                                        end
+                                    elseif CmdSettings.ClickFunction == "View" then
+                                        local camera = Workspace.CurrentCamera
+                                        if not camera then devlog("c_player.lua -- expected camera, got nil or error.") return end
+                                
+                                        local targetPlayer = player
+                                        if targetPlayer and targetPlayer.Character then
+                                            local hum = targetPlayer.Character:FindFirstChildOfClass("Humanoid")
+                                            if hum then
+                                                camera.CameraSubject = hum
+                                                logFunc("Now spectating " .. targetPlayer.Name .. ".", "default")
+                                            else
+                                                logFunc("Target player humanoid not found.", "warn")
+                                            end
+                                        else
+                                            logFunc("Player not found to view.", "error")
+                                        end
+                                    end
+                                    break
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end)
+        table.insert(activeConnections, clickConnection)
 
         local function createESP(player)
             if player == LocalPlayer then return end
@@ -144,12 +236,17 @@ Functions["esp"] = {
             box.Thickness = 1
             table.insert(activeDrawings, box)
 
+            local tracer = Drawing.new("Line")
+            tracer.Visible = false
+            tracer.Thickness = 1
+            table.insert(activeDrawings, tracer)
+
             local nameLabel = Drawing.new("Text")
             nameLabel.Visible = false
             nameLabel.Size = 14
             nameLabel.Center = true
             nameLabel.Outline = true
-            nameLabel.Color = Color3.new(1, 1, 1) -- White
+            nameLabel.Color = Color3.new(1, 1, 1)
             table.insert(activeDrawings, nameLabel)
 
             local teamLabel = Drawing.new("Text")
@@ -181,6 +278,7 @@ Functions["esp"] = {
                 local character = player.Character
                 if not character or not character:FindFirstChild("HumanoidRootPart") or not character:FindFirstChild("Humanoid") then
                     box.Visible = false
+                    tracer.Visible = false
                     nameLabel.Visible = false
                     teamLabel.Visible = false
                     healthLabel.Visible = false
@@ -210,30 +308,36 @@ Functions["esp"] = {
                     box.Position = Vector2.new(topVector.X - width / 2, topVector.Y)
                     box.Visible = true
 
-                    -- Username centered above the box
+                    -- Tracer Logic
+                    local tracersEnabled = CmdSettings and CmdSettings.Tracers
+                    if tracersEnabled then
+                        tracer.Visible = true
+                        tracer.Color = teamColor
+                        tracer.From = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y)
+                        tracer.To = Vector2.new(bottomVector.X, bottomVector.Y)
+                    else
+                        tracer.Visible = false
+                    end
+
                     nameLabel.Text = player.Name
                     nameLabel.Position = Vector2.new(topVector.X, topVector.Y - 18)
                     nameLabel.Visible = true
 
-                    -- Stats aligned to the right of the box
                     local rightX = box.Position.X + box.Size.X + 4
                     local startY = box.Position.Y
 
-                    -- Team Name Label
                     local teamName = player.Team and player.Team.Name or "No Team"
                     teamLabel.Text = "Team: " .. teamName
                     teamLabel.Color = teamColor
                     teamLabel.Position = Vector2.new(rightX, startY)
                     teamLabel.Visible = true
 
-                    -- Health Label (Green to Red gradient)
                     local healthPercent = math.clamp(humanoid.Health / humanoid.MaxHealth, 0, 1)
                     healthLabel.Color = Color3.new(1 - healthPercent, healthPercent, 0)
                     healthLabel.Text = "HP: " .. math.floor(humanoid.Health)
                     healthLabel.Position = Vector2.new(rightX, startY + 16)
                     healthLabel.Visible = true
 
-                    -- Equipped Tool Label
                     local equippedTool = character:FindFirstChildOfClass("Tool")
                     local toolName = equippedTool and equippedTool.Name or "None"
                     toolLabel.Text = "Tool: " .. toolName
@@ -241,6 +345,7 @@ Functions["esp"] = {
                     toolLabel.Visible = true
                 else
                     box.Visible = false
+                    tracer.Visible = false
                     nameLabel.Visible = false
                     teamLabel.Visible = false
                     healthLabel.Visible = false
@@ -249,6 +354,7 @@ Functions["esp"] = {
 
                 if not player.Parent then
                     box:Remove()
+                    tracer:Remove()
                     nameLabel:Remove()
                     teamLabel:Remove()
                     healthLabel:Remove()
@@ -267,6 +373,7 @@ Functions["esp"] = {
         table.insert(activeConnections, playerAddedConn)
     end
 }
+                        
 -- Spectate / View
 Functions["view"] = {
     Name = "view",
