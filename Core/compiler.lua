@@ -276,21 +276,18 @@ function compiler.Refresh()
             Arguments = {"cmdname", "settingname", "value"}, 
             Category = "Core", 
             Desc = "Changes a setting value for a specified command script.",
-            Function = function(args)
-                local cmdname = args[1]
-                local settingname = args[2]
-                local value = args[3]
+            Function = function(cmdname,settingname,value)
                 
                 if not cmdname or not settingname or value == nil then
-                    showCoreNotification("Shell", "Usage: setting <cmdname> <settingname> <value>", 5)
+                    logFunc("Usage: setting <cmdname> <settingname> <value>", "Warn")
                     return
                 end
                 
                 if _G.ShellSettings and _G.ShellSettings.Scripts and _G.ShellSettings.Scripts[cmdname] then
                     _G.ShellSettings.Scripts[cmdname][settingname] = value
-                    showCoreNotification("Shell", "Successfully updated " .. cmdname .. "." .. settingname, 5)
+                    logFunc("Successfully updated setting "..settingname.." in command "..cmdname.." to "..value, "Default")
                 else
-                    showCoreNotification("Shell", "Failed: Command or settings path not found.", 5)
+                    logFunc("Failed to update setting "..settingname.." in command "..cmdname.." to "..value, "Warn")
                 end
             end
         }
