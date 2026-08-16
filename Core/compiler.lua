@@ -7,9 +7,9 @@ _G.ShellTheme = _G.ShellTheme or "default"
 _G.ShellKeybinds = _G.ShellKeybinds or {}
 _G.ShellSettings = {
     Versions = {
-        compiler = "Gamma (#2)"
-        ui = "Not Loaded"
-        fncmgr = "Not Loaded"
+        compiler = "Gamma (#2)",
+        ui = "Not Loaded",
+        fncmgr = "Not Loaded",
     },
     Core = {
         AutoScroll = true,
