@@ -1,4 +1,4 @@
-local _G.ShellSettings["Versions"]["ui"] = "Gamma (#1)"
+local _G.ShellVersions["ui"] = "Gamma (#2)"
 
 local UserInputService = game:GetService("UserInputService")
 local Players = game:GetService("Players")
@@ -1101,11 +1101,11 @@ local shellDevLabel = createStatLabel("Dev: --", statsScroll)
 local shellThemeLabel = createStatLabel("Theme: --", statsScroll)
 
 local compilerCommitLabel = createStatLabel("Compiler: Loading...", statsScroll)
-local compilerLoadedLabel = createStatLabel("Loaded Compiler: ".._G.ShellSettings["Versions"]["compiler"], statsScroll)
+local compilerLoadedLabel = createStatLabel("Loaded Compiler: ".._G.ShellVersions["compiler"], statsScroll)
 local uiCommitLabel = createStatLabel("UI: Loading...", statsScroll)
-local uiLoadedLabel = createStatLabel("Loaded UI: ".._G.ShellSettings["Versions"]["ui"], statsScroll)
+local uiLoadedLabel = createStatLabel("Loaded UI: ".._G.ShellVersions["ui"], statsScroll)
 local functionCommitLabel = createStatLabel("FncMgr: Loading...", statsScroll)
-local functionLoadedLabel = createStatLabel("Loaded FncMgr: ".._G.ShellSettings["Versions"]["fncmgr"], statsScroll)
+local functionLoadedLabel = createStatLabel("Loaded FncMgr: ".._G.ShellVersions["fncmgr"], statsScroll)
 
 task.spawn(function()
 	local compilerData = fetchLatestCommit("Core/compiler.lua")
