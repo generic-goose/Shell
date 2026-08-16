@@ -282,6 +282,8 @@ function compiler.Refresh()
                     logWarn("Usage: setting <cmdname> <settingname> <value>", "Warn")
                     return
                 end
+
+                if value == "true" then value = true elseif value == "false" then value = false end
                 
                 if _G.ShellSettings and _G.ShellSettings.Scripts and _G.ShellSettings.Scripts[cmdname] then
                     _G.ShellSettings.Scripts[cmdname][settingname] = value
