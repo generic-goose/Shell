@@ -270,7 +270,31 @@ function compiler.Refresh()
     end
 
     local cmds = compiler.Functions
-
+    
+    cmds["setting"] = {
+            Name = "setting", 
+            Arguments = {"cmdname", "settingname", "value"}, 
+            Category = "Core", 
+            Desc = "Changes a setting value for a specified command script.",
+            Function = function(args)
+                local cmdname = args[1]
+                local settingname = args[2]
+                local value = args[3]
+                
+                if not cmdname or not settingname or value == nil then
+                    showCoreNotification("Shell", "Usage: setting <cmdname> <settingname> <value>", 5)
+                    return
+                end
+                
+                if _G.ShellSettings and _G.ShellSettings.Scripts and _G.ShellSettings.Scripts[cmdname] then
+                    _G.ShellSettings.Scripts[cmdname][settingname] = value
+                    showCoreNotification("Shell", "Successfully updated " .. cmdname .. "." .. settingname, 5)
+                else
+                    showCoreNotification("Shell", "Failed: Command or settings path not found.", 5)
+                end
+            end
+        }
+        
     cmds["download"] = {
         Name = "download", Arguments = {}, Category = "Core", Desc = "Downloads the latest Shell Core files locally to your device for faster loading or for modified core versions. Please note locally saved files will take priority over new updates pushed to the GitHub, you will need to redownload the Core files each time an update is pushed.",
         Function = function()
