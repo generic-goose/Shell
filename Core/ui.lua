@@ -1,4 +1,4 @@
-local _G.ShellVersions["ui"] = "Gamma (#2)"
+_G.ShellVersions["ui"] = "Gamma (#2)"
 
 local UserInputService = game:GetService("UserInputService")
 local Players = game:GetService("Players")
