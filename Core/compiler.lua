@@ -287,9 +287,9 @@ function compiler.Refresh()
                 
                 if _G.ShellSettings and _G.ShellSettings.Scripts and _G.ShellSettings.Scripts[cmdname] then
                     _G.ShellSettings.Scripts[cmdname][settingname] = value
-                    log("Successfully updated setting "..settingname.." in command "..cmdname.." to "..value, "Default")
+                    log("Successfully updated setting "..settingname.." in command "..cmdname.." to "..tostring(value), "Default")
                 else
-                    logWarn("Failed to update setting "..settingname.." in command "..cmdname.." to "..value, "Warn")
+                    logWarn("Failed to update setting "..settingname.." in command "..cmdname.." to "..tostring(value), "Warn")
                 end
             end
         }
