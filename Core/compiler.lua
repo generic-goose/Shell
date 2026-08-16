@@ -1,3 +1,4 @@
+-- fuck me this will need to be remade at some point but im a lazy pos
 local compiler = {Functions = {}}
 
 _G.ShellRunning = true
