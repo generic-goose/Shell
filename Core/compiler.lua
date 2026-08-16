@@ -1,7 +1,11 @@
 -- fuck me this will need to be remade at some point but im a lazy pos
 local compiler = {Functions = {}}
 
-_G.ShellVersions["compiler"] = "Gamma (#4)"
+_G.ShellVersions = {
+    compiler = "Gamma #4",
+    ui = "Gamma #2",
+    fncmgr = "Gamma #1",
+}
 _G.ShellRunning = true
 _G.ShellDev = false
 _G.ShellTheme = _G.ShellTheme or "default"
