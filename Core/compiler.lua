@@ -1,16 +1,12 @@
 -- fuck me this will need to be remade at some point but im a lazy pos
 local compiler = {Functions = {}}
 
+_G.ShellVersions["compiler"] = "Gamma (#4)"
 _G.ShellRunning = true
 _G.ShellDev = false
 _G.ShellTheme = _G.ShellTheme or "default"
 _G.ShellKeybinds = _G.ShellKeybinds or {}
 _G.ShellSettings = {
-    Versions = {
-        compiler = "Gamma (#2)",
-        ui = "Not Loaded",
-        fncmgr = "Not Loaded",
-    },
     Core = {
         AutoScroll = true,
         Timestamps = true,
