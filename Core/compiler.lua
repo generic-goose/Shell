@@ -279,15 +279,15 @@ function compiler.Refresh()
             Function = function(cmdname,settingname,value)
                 
                 if not cmdname or not settingname or value == nil then
-                    logFunc("Usage: setting <cmdname> <settingname> <value>", "Warn")
+                    logWarn("Usage: setting <cmdname> <settingname> <value>", "Warn")
                     return
                 end
                 
                 if _G.ShellSettings and _G.ShellSettings.Scripts and _G.ShellSettings.Scripts[cmdname] then
                     _G.ShellSettings.Scripts[cmdname][settingname] = value
-                    logFunc("Successfully updated setting "..settingname.." in command "..cmdname.." to "..value, "Default")
+                    log("Successfully updated setting "..settingname.." in command "..cmdname.." to "..value, "Default")
                 else
-                    logFunc("Failed to update setting "..settingname.." in command "..cmdname.." to "..value, "Warn")
+                    logWarn("Failed to update setting "..settingname.." in command "..cmdname.." to "..value, "Warn")
                 end
             end
         }
