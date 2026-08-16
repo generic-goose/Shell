@@ -1,4 +1,4 @@
-_G.ShellSettings["Versions"]["fncmgr"] = "Gamma (#1)"
+local _G.ShellVersions["fncmgr"] = "Gamma (#1)"
 local functionsList = {}
 local gameId = tostring(game.PlaceId)
 local CONFIG_PATH = "Shell/Core/config.json"
