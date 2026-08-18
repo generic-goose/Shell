@@ -579,4 +579,108 @@ end
 
 showCoreNotification("Shell", "Done! Press F2 or ' to open Command Bar.", 5)
 
+--[[
+	AntiCheatServer.lua
+	Place in ServerScriptService.
+
+	Movement validation only:
+	- Speed check (displacement vs WalkSpeed over time)
+	- Basic noclip check (raycast between last/new position)
+
+	Flags are reported via log(message, "Warn").
+]]
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+local CONFIG = {
+	MAX_SPEED_TOLERANCE = 1.15, -- allow 15% over WalkSpeed for lag/latency
+	FLAG_DECAY_SECONDS = 30,
+}
+local playerData = {} -- [player] = { lastPos, lastTime, flags = {} }
+
+local function getData(player)
+	if not playerData[player] then
+		local char = player.Character
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		playerData[player] = {
+			lastPos = hrp and hrp.Position,
+			lastTime = os.clock(),
+			flags = {},
+		}
+	end
+	return playerData[player]
+end
+
+local function flagPlayer(player, reason, severity)
+	local data = getData(player)
+	local now = os.clock()
+	table.insert(data.flags, { reason = reason, time = now, severity = severity or 1 })
+	for i = #data.flags, 1, -1 do
+		if now - data.flags[i].time > CONFIG.FLAG_DECAY_SECONDS then
+			table.remove(data.flags, i)
+		end
+	end
+
+	local totalSeverity = 0
+	for _, f in ipairs(data.flags) do
+		totalSeverity += f.severity
+	end
+
+	log(string.format("%s flagged Shell AntiCheat: %s (severity %d, total %d)",
+		player.Name, reason, severity or 1, totalSeverity), "Warn")
+end
+local function validateMovement(player)
+	local char = player.Character
+	if not char then return end
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+	local humanoid = char:FindFirstChildOfClass("Humanoid")
+	if not hrp or not humanoid then return end
+
+	local data = getData(player)
+	local now = os.clock()
+	local dt = now - data.lastTime
+	if dt <= 0 then return end
+
+	local newPos = hrp.Position
+	if data.lastPos then
+		local displacement = (newPos - data.lastPos)
+		local horizontalDist = Vector3.new(displacement.X, 0, displacement.Z).Magnitude
+		local maxAllowed = humanoid.WalkSpeed * dt * CONFIG.MAX_SPEED_TOLERANCE
+
+		if horizontalDist > maxAllowed and humanoid.SeatPart == nil then
+			flagPlayer(player, string.format("Speed: moved %.1f studs, max %.1f", horizontalDist, maxAllowed), 2)
+		end
+		if horizontalDist > 4 then
+			local rayParams = RaycastParams.new()
+			rayParams.FilterType = Enum.RaycastFilterType.Exclude
+			rayParams.FilterDescendantsInstances = { char }
+
+			local direction = displacement
+			local result = workspace:Raycast(data.lastPos, direction, rayParams)
+			if result and result.Instance and result.Instance.CanCollide then
+				local distToHit = (result.Position - data.lastPos).Magnitude
+				if distToHit < direction.Magnitude - 1 then
+					flagPlayer(player, "Possible noclip: passed through solid geometry", 3)
+				end
+			end
+		end
+	end
+
+	data.lastPos = newPos
+	data.lastTime = now
+end
+
+RunService.Heartbeat:Connect(function()
+	for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= Players.LocalPlayer then
+		    validateMovement(player)
+        end
+	end
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+	playerData[player] = nil
+end)
+                                                                        
 return compiler
