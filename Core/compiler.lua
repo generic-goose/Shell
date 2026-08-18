@@ -594,8 +594,8 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
 local CONFIG = {
-	MAX_SPEED_TOLERANCE = 1.15, -- allow 15% over WalkSpeed for lag/latency
-	FLAG_DECAY_SECONDS = 30,
+	MAX_SPEED_TOLERANCE = 3, -- allow 15% over WalkSpeed for lag/latency
+	FLAG_DECAY_SECONDS = 15,
 }
 local playerData = {} -- [player] = { lastPos, lastTime, flags = {} }
 
