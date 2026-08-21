@@ -94,63 +94,58 @@ local function parseCommandString(str)
     return table.remove(args, 1), args
 end
 
--- Config Management Functions for config.json
-local cachedConfigData = nil
-
 local function loadConfig()
-    if not checkFile or not checkFile(CONFIG_PATH) then return end
-
+    if not checkFile(CONFIG_PATH) then
+        return { imported = {}, autoexec = {} }
+    end
     local success, content = pcall(readfile, CONFIG_PATH)
-    if not success or not content or content == "" then return end
-
+    if not success or not content then
+        return { imported = {}, autoexec = {} }
+    end
     local decodeSuccess, decoded = pcall(function()
         return HttpService:JSONDecode(content)
     end)
-
     if decodeSuccess and type(decoded) == "table" then
-        cachedConfigData = decoded
+        decoded.imported = decoded.imported or {}
+        decoded.autoexec = decoded.autoexec or {}
+        return decoded
     end
+    return { imported = {}, autoexec = {} }
 end
 
-local function saveConfig()
+local function saveConfig(configTable)
     if not writefile then return end
-
     local encodeSuccess, encoded = pcall(function()
-        return HttpService:JSONEncode(_G.ShellSettings or {})
+        return HttpService:JSONEncode(configTable)
     end)
-
     if encodeSuccess then
         writefile(CONFIG_PATH, encoded)
-        if log then log("Configuration saved successfully.") end
     end
 end
 
 local function getLinesFromConfig(key)
-    _G.ShellSettings = _G.ShellSettings or {}
-    return _G.ShellSettings[key] or {}
+    local config = loadConfig()
+    return config[key] or {}
 end
 
 local function toggleConfigEntry(key, value, tag)
-    _G.ShellSettings = _G.ShellSettings or {}
-    _G.ShellSettings[key] = _G.ShellSettings[key] or {}
-
+    local config = loadConfig()
+    config[key] = config[key] or {}
     local foundIdx
-    for i, line in ipairs(_G.ShellSettings[key]) do
+    for i, line in ipairs(config[key]) do
         if line == value then
             foundIdx = i
             break
         end
     end
-
     if foundIdx then
-        table.remove(_G.ShellSettings[key], foundIdx)
-        if log then log("Removed '" .. tostring(value) .. "' from " .. tostring(tag) .. ".") end
+        table.remove(config[key], foundIdx)
+        log("Removed '" .. value .. "' from " .. tag .. ".")
     else
-        table.insert(_G.ShellSettings[key], value)
-        if log then log("Added '" .. tostring(value) .. "' to " .. tostring(tag) .. ".") end
+        table.insert(config[key], value)
+        log("Added '" .. value .. "' to " .. tag .. ".")
     end
-
-    saveConfig()
+    saveConfig(config)
 end
 
 local function loadCoreModule(localPath, remoteUrl, chunkName)
