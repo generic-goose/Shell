@@ -304,7 +304,23 @@ function compiler.Refresh()
         Name = "download", Arguments = {}, Category = "Core", Desc = "Downloads the latest Shell Core files locally to your device for faster loading or for modified core versions. Please note locally saved files will take priority over new updates pushed to the GitHub, you will need to redownload the Core files each time an update is pushed.",
         Function = function()
             downloadRepositoryFiles()
-            showCoreNotification("Shell", "Latest GitHub updates downloaded!", 5)
+            log("Latest github updates downloaded!")
+        end
+    }        
+            
+    cmds["saveconfig"] = {
+        Name = "saveconfig", Arguments = {}, Category = "Core", Desc = "Saves the current configuration of the menu to the config file, including settings.",
+        Function = function()
+            saveConfig()
+            log("Saved the current config to the config file.")
+        end
+    }        
+                
+    cmds["loadconfig"] = {
+        Name = "loadconfig", Arguments = {}, Category = "Core", Desc = "Loads the current configuration of the config file to the menu, including settings.",
+        Function = function()
+            loadConfig()
+            log("Loaded the current config from the config file.")
         end
     }
 
