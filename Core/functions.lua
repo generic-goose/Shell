@@ -23,9 +23,25 @@ local function devlog(msg)
 end
 
 local function registerSettings(cmdName, value)
-    if value and type(value.Settings) == "table" and cmdName then
-        _G.ShellSettings.Scripts = _G.ShellSettings.Scripts or {}
-        _G.ShellSettings.Scripts[cmdName] = value.Settings
+    if not (value and type(value.Settings) == "table" and cmdName) then return end
+
+    _G.ShellSettings = _G.ShellSettings or {}
+    _G.ShellSettings.Scripts = _G.ShellSettings.Scripts or {}
+    local currentScriptSettings = value.Settings
+    _G.ShellSettings.Scripts[cmdName] = _G.ShellSettings.Scripts[cmdName] or {}
+    for settingKey, defaultValue in pairs(currentScriptSettings) do
+        if _G.ShellSettings.Scripts[cmdName][settingKey] == nil then
+            _G.ShellSettings.Scripts[cmdName][settingKey] = defaultValue
+        end
+    end
+    if cachedConfigData and type(cachedConfigData.Scripts) == "table" then
+        local savedScriptSettings = cachedConfigData.Scripts[cmdName]
+        if type(savedScriptSettings) == "table" then
+            for savedKey, savedVal in pairs(savedScriptSettings) do
+                _G.ShellSettings.Scripts[cmdName][savedKey] = savedVal
+                value.Settings[savedKey] = savedVal -- Sync back to module table reference if needed
+            end
+        end
     end
 end
 
