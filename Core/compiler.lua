@@ -94,29 +94,21 @@ local function parseCommandString(str)
     return table.remove(args, 1), args
 end
 
+-- Config Management Functions for config.json
+local cachedConfigData = nil
+
 local function loadConfig()
-    if not checkFile(CONFIG_PATH) then
-        return
-    end
+    if not checkFile or not checkFile(CONFIG_PATH) then return end
 
     local success, content = pcall(readfile, CONFIG_PATH)
-    if not success or not content or content == "" then
-        return
-    end
+    if not success or not content or content == "" then return end
 
     local decodeSuccess, decoded = pcall(function()
         return HttpService:JSONDecode(content)
     end)
 
     if decodeSuccess and type(decoded) == "table" then
-        for category, settings in pairs(decoded) do
-            if type(settings) == "table" then
-                _G.ShellSettings[category] = _G.ShellSettings[category] or {}
-                for key, val in pairs(settings) do
-                    _G.ShellSettings[category][key] = val
-                end
-            end
-        end
+        cachedConfigData = decoded
     end
 end
 
@@ -124,7 +116,7 @@ local function saveConfig()
     if not writefile then return end
 
     local encodeSuccess, encoded = pcall(function()
-        return HttpService:JSONEncode(_G.ShellSettings)
+        return HttpService:JSONEncode(_G.ShellSettings or {})
     end)
 
     if encodeSuccess then
@@ -133,12 +125,31 @@ local function saveConfig()
     end
 end
 
-local function updateSetting(category, setting, value)
-    if not _G.ShellSettings[category] then
-        _G.ShellSettings[category] = {}
+local function getLinesFromConfig(key)
+    _G.ShellSettings = _G.ShellSettings or {}
+    return _G.ShellSettings[key] or {}
+end
+
+local function toggleConfigEntry(key, value, tag)
+    _G.ShellSettings = _G.ShellSettings or {}
+    _G.ShellSettings[key] = _G.ShellSettings[key] or {}
+
+    local foundIdx
+    for i, line in ipairs(_G.ShellSettings[key]) do
+        if line == value then
+            foundIdx = i
+            break
+        end
     end
 
-    _G.ShellSettings[category][setting] = value
+    if foundIdx then
+        table.remove(_G.ShellSettings[key], foundIdx)
+        if log then log("Removed '" .. tostring(value) .. "' from " .. tostring(tag) .. ".") end
+    else
+        table.insert(_G.ShellSettings[key], value)
+        if log then log("Added '" .. tostring(value) .. "' to " .. tostring(tag) .. ".") end
+    end
+
     saveConfig()
 end
 
