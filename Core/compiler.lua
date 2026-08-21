@@ -94,65 +94,54 @@ local function parseCommandString(str)
     return table.remove(args, 1), args
 end
 
--- Config Management Functions for config.json
 local function loadConfig()
     if not checkFile(CONFIG_PATH) then
-        return { imported = {}, autoexec = {} }
+        return
     end
+
     local success, content = pcall(readfile, CONFIG_PATH)
-    if not success or not content then
-        return { imported = {}, autoexec = {} }
+    if not success or not content or content == "" then
+        return
     end
+
     local decodeSuccess, decoded = pcall(function()
         return HttpService:JSONDecode(content)
     end)
+
     if decodeSuccess and type(decoded) == "table" then
-        decoded.imported = decoded.imported or {}
-        decoded.autoexec = decoded.autoexec or {}
-        return decoded
-    end
-    return { imported = {}, autoexec = {} }
-end
-
-local function saveConfig(configTable)
-    if not writefile then return end
-    local encodeSuccess, encoded = pcall(function()
-        return HttpService:JSONEncode(configTable)
-    end)
-    if encodeSuccess then
-        writefile(CONFIG_PATH, encoded)
-    end
-end
-
-local function getLinesFromConfig(key)
-    local config = loadConfig()
-    return config[key] or {}
-end
-
-local function toggleConfigEntry(key, value, tag)
-    local config = loadConfig()
-    config[key] = config[key] or {}
-    
-    local foundIdx
-    for i, line in ipairs(config[key]) do
-        if line == value then
-            foundIdx = i
-            break
+        for category, settings in pairs(decoded) do
+            if type(settings) == "table" then
+                _G.ShellSettings[category] = _G.ShellSettings[category] or {}
+                for key, val in pairs(settings) do
+                    _G.ShellSettings[category][key] = val
+                end
+            end
         end
     end
-
-    if foundIdx then
-        table.remove(config[key], foundIdx)
-        log("Removed '" .. value .. "' from " .. tag .. ".")
-    else
-        table.insert(config[key], value)
-        log("Added '" .. value .. "' to " .. tag .. ".")
-    end
-
-    saveConfig(config)
 end
 
--- Non-blocking core module loader
+local function saveConfig()
+    if not writefile then return end
+
+    local encodeSuccess, encoded = pcall(function()
+        return HttpService:JSONEncode(_G.ShellSettings)
+    end)
+
+    if encodeSuccess then
+        writefile(CONFIG_PATH, encoded)
+        if log then log("Configuration saved successfully.") end
+    end
+end
+
+local function updateSetting(category, setting, value)
+    if not _G.ShellSettings[category] then
+        _G.ShellSettings[category] = {}
+    end
+
+    _G.ShellSettings[category][setting] = value
+    saveConfig()
+end
+
 local function loadCoreModule(localPath, remoteUrl, chunkName)
     local localExists = checkFile(localPath)
     local localContent = localExists and readfile(localPath) or nil
